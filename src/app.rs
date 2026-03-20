@@ -122,7 +122,7 @@ impl App {
                 FocusPane::Browser => self.browser.move_up(),
                 FocusPane::Player => self.send(AudioCommand::AdjustVolume(0.05)),
             },
-            KeyCode::Char(' ') => self.send(AudioCommand::TogglePause),
+            KeyCode::Char(' ') => self.toggle_pause_or_play_selected(),
             KeyCode::Char('s') => self.send(AudioCommand::Stop),
             KeyCode::Char('n') => self.send(AudioCommand::Next),
             KeyCode::Char('p') => self.send(AudioCommand::Previous),
@@ -134,6 +134,23 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn toggle_pause_or_play_selected(&mut self) {
+        if self.player.current_track.is_none()
+            && let Some((path, playlist, index)) = self.browser.selected_audio_selection()
+        {
+            self.send(AudioCommand::LoadAndPlay {
+                path,
+                playlist,
+                index,
+            });
+            self.status_line =
+                String::from("Playing selection · Space pause/resume · h/l seek · n/p next/prev");
+            return;
+        }
+
+        self.send(AudioCommand::TogglePause);
     }
 
     fn activate_selected(&mut self) -> anyhow::Result<()> {
@@ -166,6 +183,68 @@ impl App {
         if let Err(error) = self.command_tx.send(command) {
             self.status_line = format!("audio engine disconnected: {error}");
             self.should_quit = true;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use crossterm::event::{KeyEvent, KeyModifiers};
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::audio_engine::Track;
+
+    #[test]
+    fn space_starts_selected_track_when_nothing_is_loaded() {
+        let temp = tempdir().unwrap();
+        let track_path = temp.path().join("song.wav");
+        std::fs::write(&track_path, b"stub").unwrap();
+        let expected_path = std::fs::canonicalize(&track_path).unwrap();
+
+        let (command_tx, command_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let mut app = App::new(temp.path().to_path_buf(), command_tx, event_rx).unwrap();
+
+        app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+            .unwrap();
+
+        match command_rx.recv().unwrap() {
+            AudioCommand::LoadAndPlay {
+                path,
+                playlist,
+                index,
+            } => {
+                assert_eq!(path, expected_path);
+                assert_eq!(playlist, vec![expected_path.clone()]);
+                assert_eq!(index, 0);
+            }
+            other => panic!("expected LoadAndPlay, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn space_toggles_pause_when_track_is_already_loaded() {
+        let temp = tempdir().unwrap();
+        let track_path = temp.path().join("song.wav");
+        std::fs::write(&track_path, b"stub").unwrap();
+
+        let (command_tx, command_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let mut app = App::new(temp.path().to_path_buf(), command_tx, event_rx).unwrap();
+        app.player.current_track = Some(Track {
+            path: track_path,
+            title: String::from("song.wav"),
+        });
+
+        app.on_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+            .unwrap();
+
+        match command_rx.recv().unwrap() {
+            AudioCommand::TogglePause => {}
+            other => panic!("expected TogglePause, got {other:?}"),
         }
     }
 }

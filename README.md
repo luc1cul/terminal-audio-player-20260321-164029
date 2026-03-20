@@ -15,7 +15,7 @@ A lightweight Rust terminal audio player with a decoupled audio engine and TUI f
 
 ## Keybindings
 
-- `Space` — play / pause
+- `Space` — play / pause (or start the selected file if nothing is loaded)
 - `Tab` — switch focus between browser and player
 - `j / k` — browser: move down/up, player: volume down/up
 - `Enter` — expand directory or play selected file

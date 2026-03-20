@@ -244,3 +244,51 @@ pub fn is_audio_file(path: &Path) -> bool {
         Some("mp3" | "flac" | "wav" | "ogg")
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn browser_lists_directories_before_audio_files() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        fs::create_dir(root.join("Album")).unwrap();
+        fs::write(root.join("track1.mp3"), b"stub").unwrap();
+        fs::write(root.join("notes.txt"), b"ignore").unwrap();
+
+        let browser = FileBrowser::new(root.to_path_buf()).unwrap();
+        let names = browser
+            .entries()
+            .iter()
+            .map(|entry| (&entry.name, entry.kind, entry.depth))
+            .collect::<Vec<_>>();
+
+        assert_eq!(names.len(), 2);
+        assert_eq!(names[0], (&"Album".to_string(), EntryKind::Directory, 0));
+        assert_eq!(names[1], (&"track1.mp3".to_string(), EntryKind::File, 0));
+    }
+
+    #[test]
+    fn expanding_directory_reveals_nested_audio_files() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        fs::create_dir(root.join("Album")).unwrap();
+        fs::write(root.join("Album").join("track2.ogg"), b"stub").unwrap();
+        fs::write(root.join("track1.mp3"), b"stub").unwrap();
+
+        let mut browser = FileBrowser::new(root.to_path_buf()).unwrap();
+        browser.toggle_selected_directory().unwrap();
+
+        let entries = browser.entries();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].name, "Album");
+        assert_eq!(entries[0].kind, EntryKind::Directory);
+        assert!(entries[0].expanded);
+        assert_eq!(entries[1].name, "track2.ogg");
+        assert_eq!(entries[1].kind, EntryKind::File);
+        assert_eq!(entries[1].depth, 1);
+        assert_eq!(entries[2].name, "track1.mp3");
+    }
+}

@@ -10,3 +10,6 @@ ratatui = "0.30.0"
 rodio = { version = "0.22.2", features = ["playback", "symphonia-all"] }
 thiserror = "2.0.18"
 walkdir = "2.5.0"
+
+[dev-dependencies]
+tempfile = "3.23.0"
