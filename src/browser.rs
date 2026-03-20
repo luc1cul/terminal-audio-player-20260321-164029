@@ -26,6 +26,7 @@ pub struct FileBrowser {
     root: PathBuf,
     expanded: BTreeSet<PathBuf>,
     visible_entries: Vec<BrowserEntry>,
+    audio_playlist_cache: Vec<PathBuf>,
     selected: usize,
 }
 
@@ -39,6 +40,7 @@ impl FileBrowser {
             root,
             expanded,
             visible_entries: Vec::new(),
+            audio_playlist_cache: Vec::new(),
             selected: 0,
         };
         browser.refresh()?;
@@ -144,6 +146,25 @@ impl FileBrowser {
     }
 
     pub fn audio_playlist(&self) -> Vec<PathBuf> {
+        self.audio_playlist_cache.clone()
+    }
+
+    fn refresh(&mut self) -> io::Result<()> {
+        let mut visible_entries = Vec::new();
+        self.collect_children(&self.root, 0, &mut visible_entries)?;
+        self.visible_entries = visible_entries;
+        self.audio_playlist_cache = self.build_audio_playlist();
+
+        if self.visible_entries.is_empty() {
+            self.selected = 0;
+        } else {
+            self.selected = self.selected.min(self.visible_entries.len() - 1);
+        }
+
+        Ok(())
+    }
+
+    fn build_audio_playlist(&self) -> Vec<PathBuf> {
         let mut playlist = WalkDir::new(&self.root)
             .follow_links(false)
             .into_iter()
@@ -154,20 +175,6 @@ impl FileBrowser {
 
         sort_paths(&mut playlist);
         playlist
-    }
-
-    fn refresh(&mut self) -> io::Result<()> {
-        let mut visible_entries = Vec::new();
-        self.collect_children(&self.root, 0, &mut visible_entries)?;
-        self.visible_entries = visible_entries;
-
-        if self.visible_entries.is_empty() {
-            self.selected = 0;
-        } else {
-            self.selected = self.selected.min(self.visible_entries.len() - 1);
-        }
-
-        Ok(())
     }
 
     fn collect_children(
@@ -290,5 +297,21 @@ mod tests {
         assert_eq!(entries[1].kind, EntryKind::File);
         assert_eq!(entries[1].depth, 1);
         assert_eq!(entries[2].name, "track1.mp3");
+    }
+
+    #[test]
+    fn audio_playlist_includes_nested_files_even_when_directory_is_collapsed() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        fs::create_dir(root.join("Album")).unwrap();
+        fs::write(root.join("Album").join("track2.ogg"), b"stub").unwrap();
+        fs::write(root.join("track1.mp3"), b"stub").unwrap();
+
+        let browser = FileBrowser::new(root.to_path_buf()).unwrap();
+        let playlist = browser.audio_playlist();
+
+        assert_eq!(playlist.len(), 2);
+        assert!(playlist.iter().any(|path| path.ends_with("track1.mp3")));
+        assert!(playlist.iter().any(|path| path.ends_with("track2.ogg")));
     }
 }

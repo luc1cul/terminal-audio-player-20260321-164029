@@ -237,7 +237,7 @@ impl<B: PlaybackBackend> EngineController<B> {
             AudioCommand::TogglePause => self.toggle_pause(),
             AudioCommand::Stop => self.stop(),
             AudioCommand::Next => self.advance_queue(1),
-            AudioCommand::Previous => self.advance_queue(-1),
+            AudioCommand::Previous => self.previous_track(),
             AudioCommand::SeekBy(seconds) => self.seek_by(seconds),
             AudioCommand::AdjustVolume(delta) => self.adjust_volume(delta),
             AudioCommand::Shutdown => Ok(()),
@@ -298,6 +298,11 @@ impl<B: PlaybackBackend> EngineController<B> {
         let duration = self
             .backend
             .load(path, Duration::ZERO, self.state.volume, paused)?;
+        let queue_index = if playlist.is_empty() {
+            None
+        } else {
+            Some(index.min(playlist.len().saturating_sub(1)))
+        };
 
         self.state.current_track = Some(Track::from_path(path));
         self.state.duration = duration;
@@ -308,7 +313,7 @@ impl<B: PlaybackBackend> EngineController<B> {
             PlaybackStatus::Playing
         };
         self.state.queue = playlist;
-        self.state.queue_index = Some(index);
+        self.state.queue_index = queue_index;
         Ok(())
     }
 
@@ -381,6 +386,15 @@ impl<B: PlaybackBackend> EngineController<B> {
         self.state.position = target;
         self.state.duration = duration;
         Ok(())
+    }
+
+    fn previous_track(&mut self) -> Result<(), AudioError> {
+        if self.backend.position() >= Duration::from_secs(3) {
+            let paused = self.state.status == PlaybackStatus::Paused;
+            return self.restart_current(paused);
+        }
+
+        self.advance_queue(-1)
     }
 
     fn advance_queue(&mut self, offset: isize) -> Result<(), AudioError> {
@@ -630,6 +644,7 @@ mod tests {
             Some("three.ogg")
         );
 
+        controller.backend.position = Duration::from_secs(0);
         controller.handle_command(AudioCommand::Previous);
         assert_eq!(controller.state.queue_index, Some(1));
         assert_eq!(
@@ -640,6 +655,51 @@ mod tests {
                 .map(|track| track.title.as_str()),
             Some("two.flac")
         );
+    }
+
+    #[test]
+    fn previous_restarts_current_track_when_already_in_progress() {
+        let backend = MockBackend {
+            position: Duration::from_secs(12),
+            ..MockBackend::default()
+        };
+        let mut controller = EngineController::new(backend);
+        let playlist = sample_playlist();
+
+        controller.handle_command(AudioCommand::LoadAndPlay {
+            path: playlist[1].clone(),
+            playlist,
+            index: 1,
+        });
+        controller.backend.position = Duration::from_secs(12);
+
+        controller.handle_command(AudioCommand::Previous);
+
+        assert_eq!(controller.state.queue_index, Some(1));
+        assert_eq!(controller.state.position, Duration::ZERO);
+        assert_eq!(
+            controller
+                .backend
+                .loads
+                .last()
+                .map(|entry| (&entry.0, entry.1)),
+            Some((&PathBuf::from("two.flac"), Duration::ZERO))
+        );
+    }
+
+    #[test]
+    fn load_and_play_clamps_invalid_queue_index() {
+        let backend = MockBackend::default();
+        let mut controller = EngineController::new(backend);
+        let playlist = sample_playlist();
+
+        controller.handle_command(AudioCommand::LoadAndPlay {
+            path: playlist[2].clone(),
+            playlist,
+            index: usize::MAX,
+        });
+
+        assert_eq!(controller.state.queue_index, Some(2));
     }
 
     #[test]
