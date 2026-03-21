@@ -10,7 +10,7 @@ use crossterm::{
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Margin, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Wrap},
@@ -24,8 +24,8 @@ const UI_TICK_MS: u64 = 100;
 const XP_BLUE: Color = Color::Rgb(38, 84, 172);
 const XP_BLUE_DEEP: Color = Color::Rgb(14, 49, 120);
 const XP_BLUE_MID: Color = Color::Rgb(77, 134, 216);
-const XP_GLASS: Color = Color::Rgb(104, 170, 246);
 const XP_SKY: Color = Color::Rgb(144, 200, 255);
+const XP_GLASS: Color = Color::Rgb(110, 176, 245);
 const XP_HIGHLIGHT: Color = Color::Rgb(255, 225, 125);
 const XP_SILVER: Color = Color::Rgb(222, 231, 244);
 const XP_PANEL: Color = Color::Rgb(198, 218, 245);
@@ -33,6 +33,7 @@ const XP_PANEL_DARK: Color = Color::Rgb(131, 165, 214);
 const XP_TEXT_DARK: Color = Color::Rgb(8, 32, 86);
 const XP_TEXT_LIGHT: Color = Color::Rgb(247, 251, 255);
 const XP_MINT: Color = Color::Rgb(119, 247, 208);
+const XP_RED: Color = Color::Rgb(188, 61, 61);
 
 pub fn run(app: &mut App) -> anyhow::Result<()> {
     enable_raw_mode()?;
@@ -107,14 +108,10 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &App) {
 }
 
 fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
-    let transport = match app.player().status {
-        PlaybackStatus::Playing => " FLOW ",
-        PlaybackStatus::Paused => " HOLD ",
-        PlaybackStatus::Stopped => " READY ",
-    };
-    let focus = match app.focus() {
-        FocusPane::Browser => " LIBRARY ",
-        FocusPane::Player => " PLAYER ",
+    let title = match app.player().status {
+        PlaybackStatus::Playing => "Now Playing",
+        PlaybackStatus::Paused => "Paused",
+        PlaybackStatus::Stopped => "Library Ready",
     };
 
     let text = Line::from(vec![
@@ -126,19 +123,11 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            "  Windows XP mood • glossy shell • layered wave deck  ",
+            "  XP blue glass • media deck • wave tank  ",
             Style::default().fg(XP_TEXT_LIGHT).bg(XP_BLUE),
         ),
         Span::styled(
-            focus,
-            Style::default()
-                .fg(XP_TEXT_DARK)
-                .bg(XP_SILVER)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            transport,
+            format!(" {} ", title),
             Style::default()
                 .fg(XP_TEXT_DARK)
                 .bg(XP_HIGHLIGHT)
@@ -156,28 +145,16 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
-    let entries = app.browser().entries();
-    let (directory_count, file_count) = browser_counts(entries);
-    let root_name = app
-        .browser()
-        .root()
-        .file_name()
-        .map(|value| clean_label(&value.to_string_lossy()))
-        .unwrap_or_else(|| app.browser().root().display().to_string());
+    let root_label = fit_text(
+        &app.browser().root().display().to_string(),
+        area.width.saturating_sub(20) as usize,
+    );
     let title = match app.focus() {
-        FocusPane::Browser => {
-            format!(" Media Library ◆ {root_name} · {directory_count} dirs · {file_count} files ")
-        }
-        FocusPane::Player => {
-            format!(" Media Library ◇ {root_name} · {directory_count} dirs · {file_count} files ")
-        }
+        FocusPane::Browser => format!(" Media Library ◆ {root_label}"),
+        FocusPane::Player => format!(" Media Library ◇ {root_label}"),
     };
 
-    let columns = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(8), Constraint::Length(6)])
-        .split(area);
-
+    let entries = app.browser().entries();
     let items = if entries.is_empty() {
         vec![ListItem::new(Line::from(vec![Span::styled(
             " No audio files or folders found ",
@@ -202,8 +179,7 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         state.select(Some(app.browser().selected_index()));
     }
 
-    frame.render_stateful_widget(list, columns[0], &mut state);
-    render_browser_summary(frame, app, columns[1], directory_count, file_count);
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 fn render_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
@@ -211,10 +187,10 @@ fn render_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(10),
-            Constraint::Length(9),
+            Constraint::Length(10),
             Constraint::Length(3),
-            Constraint::Length(5),
-            Constraint::Min(6),
+            Constraint::Length(7),
+            Constraint::Min(5),
         ])
         .split(area);
 
@@ -241,122 +217,156 @@ fn render_now_playing(
     } else {
         " Now Playing ◇ "
     };
-    let details = track_details(player);
-    let title_width = area.width.saturating_sub(14) as usize;
-    let phase = animation_phase(player, 180);
-    let title_display = marquee_text(&details.title, title_width.max(20), phase);
+
+    let block = xp_panel(title, focused);
+    frame.render_widget(block, area);
+
+    let inner = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+
+    if inner.width < 24 || inner.height < 5 {
+        return;
+    }
+
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(16), Constraint::Min(24)])
+        .split(inner);
+
+    render_album_tile(frame, player, columns[0]);
+
+    let track_name = player
+        .current_track
+        .as_ref()
+        .map(|track| track.title.clone())
+        .unwrap_or_else(|| String::from("Drop into the library and press Enter"));
+
     let queue_text = match (player.queue_index, player.queue.is_empty()) {
-        (Some(index), false) => format!("{} of {}", index + 1, player.queue.len()),
-        _ => String::from("0 of 0"),
+        (Some(index), false) => format!("{} / {}", index + 1, player.queue.len()),
+        _ => String::from("0 / 0"),
     };
-    let remaining = player
-        .duration
-        .map(|duration| {
-            format!(
-                "-{}",
-                format_duration(duration.saturating_sub(player.position))
-            )
-        })
-        .unwrap_or_else(|| String::from("--:--"));
 
-    let mut top_row = vec![status_chip(player), Span::raw("  ")];
-    top_row.extend(transport_spans(player));
+    let status_chip = match player.status {
+        PlaybackStatus::Playing => chip("PLAYING", XP_TEXT_DARK, XP_MINT),
+        PlaybackStatus::Paused => chip("PAUSED", XP_TEXT_DARK, XP_HIGHLIGHT),
+        PlaybackStatus::Stopped => chip("STOPPED", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+    };
 
-    let lines = vec![
-        Line::from(top_row),
+    let detail_lines = vec![
         Line::from(vec![
-            label_span(" Track  "),
             Span::styled(
-                title_display,
+                " Track  ",
+                Style::default()
+                    .fg(XP_BLUE_DEEP)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                fit_text(&track_name, columns[1].width.saturating_sub(10) as usize),
                 Style::default()
                     .fg(XP_TEXT_DARK)
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            label_span(" Artist "),
-            Span::raw(details.artist),
-            Span::raw("   "),
-            label_span(" Album "),
-            Span::raw(details.album),
+            status_chip,
+            Span::raw(" "),
+            chip(format!("QUEUE {queue_text}"), XP_TEXT_DARK, XP_PANEL),
+            Span::raw(" "),
+            chip(format_duration(player.position), XP_TEXT_LIGHT, XP_BLUE_MID),
         ]),
-        Line::from(vec![
-            label_span(" Format "),
-            Span::raw(details.extension),
-            Span::raw("   "),
-            label_span(" Queue "),
-            Span::raw(queue_text),
-        ]),
-        Line::from(vec![
-            label_span(" Level  "),
-            Span::styled(
-                volume_meter(player.volume, 10),
-                Style::default().fg(XP_BLUE_DEEP),
-            ),
-            Span::raw(format!(" {:>3.0}%", player.volume * 100.0)),
-        ]),
-        Line::from(vec![
-            label_span(" Time   "),
-            Span::raw(format!(
-                "{} / {}",
-                format_duration(player.position),
-                player
-                    .duration
-                    .map(format_duration)
-                    .unwrap_or_else(|| String::from("--:--"))
-            )),
-            Span::raw("   "),
-            label_span(" Remain "),
-            Span::raw(remaining),
-        ]),
-        Line::from(vec![
-            label_span(" Mood   "),
-            Span::styled(playback_mood(player), Style::default().fg(XP_BLUE)),
-        ]),
+        meter_line(
+            "volume",
+            player.volume as f64,
+            columns[1].width.saturating_sub(18) as usize,
+            XP_MINT,
+            XP_PANEL_DARK,
+        ),
+        transport_line(player),
+        info_message_line(player, columns[1].width as usize),
     ];
 
-    let widget = Paragraph::new(lines)
-        .block(xp_panel(title, focused))
+    let widget = Paragraph::new(detail_lines)
+        .style(Style::default().bg(XP_SILVER))
         .wrap(Wrap { trim: false });
+    frame.render_widget(widget, columns[1]);
+}
+
+fn render_album_tile(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
+    let widget = Paragraph::new(album_tile_lines(player))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .title(" Deck ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(XP_SKY))
+                .style(Style::default().bg(XP_BLUE_MID)),
+        )
+        .style(Style::default().bg(XP_BLUE_MID));
     frame.render_widget(widget, area);
 }
 
 fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
-    let width = area.width.saturating_sub(4) as usize;
-    let lines = vec![
-        Line::from(vec![
-            Span::styled(
-                "  signal deck",
-                Style::default()
-                    .fg(XP_TEXT_LIGHT)
-                    .add_modifier(Modifier::ITALIC),
-            ),
-            Span::raw("   "),
-            Span::styled(
-                transport_state_label(player),
-                Style::default().fg(XP_HIGHLIGHT),
-            ),
-        ]),
-        make_spectrum_line(player, width),
-        make_wave_line(player, width, 5.4, 0.0, [XP_GLASS, XP_MINT, XP_HIGHLIGHT]),
-        make_wave_line(player, width, 3.1, 1.8, [XP_PANEL_DARK, XP_SKY, XP_SILVER]),
-        make_glow_line(player, width),
-        make_reflection_line(player, width),
-        Line::from(vec![Span::styled(
-            visualizer_caption(player),
-            Style::default().fg(XP_SILVER),
-        )]),
-    ];
+    let block = Block::default()
+        .title(" Wave Tank ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(XP_BLUE_DEEP))
+        .style(Style::default().bg(XP_BLUE_DEEP));
+    frame.render_widget(block, area);
 
-    let widget = Paragraph::new(lines).block(
-        Block::default()
-            .title(" Wave View ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(XP_BLUE_DEEP))
-            .style(Style::default().bg(XP_BLUE_DEEP)),
-    );
+    let inner = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
 
-    frame.render_widget(widget, area);
+    if inner.width < 12 || inner.height < 6 {
+        return;
+    }
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(4),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
+        .split(inner);
+
+    let legend = Paragraph::new(Line::from(vec![
+        chip("SPECTRUM", XP_TEXT_DARK, XP_HIGHLIGHT),
+        Span::raw(" "),
+        chip("WAVE", XP_TEXT_LIGHT, XP_BLUE_MID),
+        Span::raw(" "),
+        chip("GLOW", XP_TEXT_DARK, XP_MINT),
+    ]))
+    .style(Style::default().bg(XP_BLUE_DEEP));
+    frame.render_widget(legend, rows[0]);
+
+    let spectrum = Paragraph::new(make_spectrum_lines(
+        player,
+        rows[1].width as usize,
+        rows[1].height as usize,
+    ))
+    .style(Style::default().bg(XP_BLUE_DEEP));
+    frame.render_widget(spectrum, rows[1]);
+
+    let wave = Paragraph::new(make_wave_line(player, rows[2].width as usize))
+        .style(Style::default().bg(XP_BLUE_DEEP));
+    frame.render_widget(wave, rows[2]);
+
+    let glow = Paragraph::new(make_glow_line(player, rows[3].width as usize))
+        .style(Style::default().bg(XP_BLUE_DEEP));
+    frame.render_widget(glow, rows[3]);
+
+    let caption = Paragraph::new(Line::from(vec![Span::styled(
+        fit_text(&visualizer_caption(player), rows[4].width as usize),
+        Style::default().fg(XP_SILVER),
+    )]))
+    .style(Style::default().bg(XP_BLUE_DEEP));
+    frame.render_widget(caption, rows[4]);
 }
 
 fn render_progress(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
@@ -365,7 +375,7 @@ fn render_progress(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: R
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Transport Ribbon ")
+                .title(" Seek Ribbon ")
                 .border_style(Style::default().fg(XP_BLUE_DEEP))
                 .style(Style::default().bg(XP_SILVER)),
         )
@@ -389,20 +399,15 @@ fn render_keys(frame: &mut ratatui::Frame<'_>, area: Rect) {
 
 fn render_queue(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
     let lines = if player.queue.is_empty() {
-        vec![
-            Line::from(vec![Span::styled(
-                " Queue is empty — pick a track from the library.",
-                Style::default().fg(XP_TEXT_DARK),
-            )]),
-            Line::from(vec![Span::styled(
-                " The carousel will show the current song and the next few jumps.",
-                Style::default().fg(XP_BLUE),
-            )]),
-        ]
+        vec![Line::from(vec![Span::styled(
+            " Queue is empty — pick a track from the library.",
+            Style::default().fg(XP_TEXT_DARK),
+        )])]
     } else {
         let current_index = player.queue_index.unwrap_or(0);
-        let start = current_index.saturating_sub(1);
-        let end = (start + 6).min(player.queue.len());
+        let start = current_index.saturating_sub(2);
+        let end = (start + 5).min(player.queue.len());
+        let width = area.width.saturating_sub(9) as usize;
 
         player.queue[start..end]
             .iter()
@@ -410,34 +415,38 @@ fn render_queue(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect
             .map(|(offset, path)| {
                 let absolute_index = start + offset;
                 let name = path
-                    .file_stem()
-                    .map(|name| clean_label(&name.to_string_lossy()))
-                    .unwrap_or_else(|| clean_label(&path.display().to_string()));
-                let prefix = match Some(absolute_index) == player.queue_index {
-                    true => " NOW ",
-                    false if absolute_index > current_index => " NEXT",
-                    false => " PREV",
-                };
-                let style = match Some(absolute_index) == player.queue_index {
-                    true => Style::default()
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string());
+                let style = if Some(absolute_index) == player.queue_index {
+                    Style::default()
                         .fg(XP_TEXT_LIGHT)
                         .bg(XP_BLUE_MID)
-                        .add_modifier(Modifier::BOLD),
-                    false if absolute_index > current_index => Style::default().fg(XP_BLUE_DEEP),
-                    false => Style::default().fg(XP_PANEL_DARK),
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(XP_TEXT_DARK)
                 };
 
-                Line::from(vec![
-                    Span::styled(prefix, style.add_modifier(Modifier::BOLD)),
-                    Span::raw(" "),
-                    Span::styled(format!("{:>2}. {}", absolute_index + 1, name), style),
-                ])
+                let prefix = if Some(absolute_index) == player.queue_index {
+                    "▶"
+                } else {
+                    "•"
+                };
+
+                Line::from(vec![Span::styled(
+                    format!(
+                        " {prefix} {:>2}. {}",
+                        absolute_index + 1,
+                        fit_text(&name, width)
+                    ),
+                    style,
+                )])
             })
             .collect()
     };
 
     let widget = Paragraph::new(lines)
-        .block(xp_panel(" Queue Carousel ", false))
+        .block(xp_panel(" Queue Preview ", false))
         .wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
 }
@@ -453,16 +462,8 @@ fn render_status_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         ),
         Span::raw(" "),
         Span::styled(
-            app.status_line().to_string(),
+            fit_text(app.status_line(), area.width.saturating_sub(12) as usize),
             Style::default().fg(XP_TEXT_DARK),
-        ),
-        Span::raw("   "),
-        Span::styled(
-            match app.focus() {
-                FocusPane::Browser => " Focus: library ",
-                FocusPane::Player => " Focus: player ",
-            },
-            Style::default().fg(XP_BLUE_DEEP),
         ),
     ]))
     .block(
@@ -519,82 +520,12 @@ fn browser_item(entry: &BrowserEntry) -> ListItem<'static> {
     ]))
 }
 
-fn render_browser_summary(
-    frame: &mut ratatui::Frame<'_>,
-    app: &App,
-    area: Rect,
-    directory_count: usize,
-    file_count: usize,
-) {
-    let selected = app.browser().selected_entry();
-    let selected_name = selected
-        .map(|entry| clean_label(&entry.name))
-        .unwrap_or_else(|| String::from("Nothing selected"));
-    let selected_kind = selected
-        .map(|entry| match entry.kind {
-            EntryKind::Directory => "folder",
-            EntryKind::File => "track",
-        })
-        .unwrap_or("idle");
-    let selected_path = selected
-        .map(|entry| {
-            tail_clip(
-                &entry.path.display().to_string(),
-                area.width.saturating_sub(12) as usize,
-            )
-        })
-        .unwrap_or_else(|| {
-            tail_clip(
-                &app.browser().root().display().to_string(),
-                area.width.saturating_sub(12) as usize,
-            )
-        });
-    let depth = selected.map(|entry| entry.depth).unwrap_or(0);
-
-    let lines = vec![
-        Line::from(vec![
-            label_span(" Selected "),
-            Span::styled(
-                selected_name,
-                Style::default()
-                    .fg(XP_TEXT_DARK)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(vec![
-            label_span(" Kind     "),
-            Span::raw(selected_kind),
-            Span::raw("   "),
-            label_span(" Depth "),
-            Span::raw(depth.to_string()),
-        ]),
-        Line::from(vec![
-            label_span(" Library  "),
-            Span::raw(format!("{directory_count} dirs · {file_count} files")),
-        ]),
-        Line::from(vec![label_span(" Path     "), Span::raw(selected_path)]),
-    ];
-
-    let widget = Paragraph::new(lines)
-        .block(xp_panel(" Selection ", false))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(widget, area);
-}
-
-fn browser_counts(entries: &[BrowserEntry]) -> (usize, usize) {
-    entries
-        .iter()
-        .fold((0, 0), |(directories, files), entry| match entry.kind {
-            EntryKind::Directory => (directories + 1, files),
-            EntryKind::File => (directories, files + 1),
-        })
-}
-
 fn help_lines() -> Vec<Line<'static>> {
     vec![
-        Line::from(" Space play-pause · q quit · Tab switch focus ".fg(XP_TEXT_DARK)),
-        Line::from(" Browser: j/k move · Enter open-play · ←/→ collapse-expand ".fg(XP_TEXT_DARK)),
-        Line::from(" Player: j/k volume · +/- fine tune · h/l seek · n/p jump ".fg(XP_TEXT_DARK)),
+        Line::from(" Space play/pause · q quit · Tab switch focus ".fg(XP_TEXT_DARK)),
+        Line::from(" Browser: j/k move · Enter open/play · ←/→ collapse/expand ".fg(XP_TEXT_DARK)),
+        Line::from(" Player: j/k volume · +/- fine tune · h/l seek ".fg(XP_TEXT_DARK)),
+        Line::from(" Queue travel: n/p next-prev · s stop ".fg(XP_TEXT_DARK)),
     ]
 }
 
@@ -621,235 +552,241 @@ fn format_duration(duration: Duration) -> String {
 
 fn playback_mood(player: &PlayerState) -> &'static str {
     match player.status {
-        PlaybackStatus::Playing => "blue-glass momentum",
-        PlaybackStatus::Paused => "frozen shimmer",
-        PlaybackStatus::Stopped => "waiting for a signal",
+        PlaybackStatus::Playing => "blue-glass lift",
+        PlaybackStatus::Paused => "held chrome shimmer",
+        PlaybackStatus::Stopped => "sleeping in the dock",
     }
 }
 
-fn transport_state_label(player: &PlayerState) -> &'static str {
+fn visualizer_caption(player: &PlayerState) -> String {
     match player.status {
-        PlaybackStatus::Playing => "dual-wave scan is live",
-        PlaybackStatus::Paused => "scanline frozen in place",
-        PlaybackStatus::Stopped => "deck idling on a soft glow",
+        PlaybackStatus::Playing => {
+            String::from("Time-driven spectrum is keyed to track, volume, and playback position.")
+        }
+        PlaybackStatus::Paused => {
+            String::from("Spectrum is frozen at the current playback posture.")
+        }
+        PlaybackStatus::Stopped => {
+            String::from("Idle deck shimmer — select a track to light the tank.")
+        }
     }
 }
 
-fn visualizer_caption(player: &PlayerState) -> &'static str {
-    match player.status {
-        PlaybackStatus::Playing => "Layered bands ride playback time instead of looping blindly.",
-        PlaybackStatus::Paused => "Phase is preserved while the transport holds.",
-        PlaybackStatus::Stopped => "Idle chrome stays lit until a track wakes the panel.",
-    }
-}
-
-fn status_chip(player: &PlayerState) -> Span<'static> {
-    match player.status {
-        PlaybackStatus::Playing => Span::styled(
-            " PLAYING ",
-            Style::default()
-                .fg(XP_TEXT_DARK)
-                .bg(XP_MINT)
-                .add_modifier(Modifier::BOLD),
-        ),
-        PlaybackStatus::Paused => Span::styled(
-            " PAUSED ",
-            Style::default()
-                .fg(XP_TEXT_DARK)
-                .bg(XP_HIGHLIGHT)
-                .add_modifier(Modifier::BOLD),
-        ),
-        PlaybackStatus::Stopped => Span::styled(
-            " STOPPED ",
-            Style::default()
-                .fg(XP_TEXT_LIGHT)
-                .bg(XP_BLUE_DEEP)
-                .add_modifier(Modifier::BOLD),
-        ),
-    }
-}
-
-fn transport_spans(player: &PlayerState) -> Vec<Span<'static>> {
-    let passive = Style::default().fg(XP_TEXT_LIGHT).bg(XP_PANEL_DARK);
-    let accent = match player.status {
-        PlaybackStatus::Playing => Style::default().fg(XP_TEXT_DARK).bg(XP_MINT),
-        PlaybackStatus::Paused => Style::default().fg(XP_TEXT_DARK).bg(XP_HIGHLIGHT),
-        PlaybackStatus::Stopped => Style::default().fg(XP_TEXT_LIGHT).bg(XP_BLUE_MID),
-    }
-    .add_modifier(Modifier::BOLD);
+fn album_tile_lines(player: &PlayerState) -> Vec<Line<'static>> {
+    let glyph = match player.status {
+        PlaybackStatus::Playing => "♫",
+        PlaybackStatus::Paused => "♪",
+        PlaybackStatus::Stopped => "♬",
+    };
+    let badge_bg = match player.status {
+        PlaybackStatus::Playing => XP_MINT,
+        PlaybackStatus::Paused => XP_HIGHLIGHT,
+        PlaybackStatus::Stopped => XP_PANEL,
+    };
+    let badge_fg = if player.status == PlaybackStatus::Stopped {
+        XP_BLUE_DEEP
+    } else {
+        XP_TEXT_DARK
+    };
 
     vec![
-        Span::styled(" ◀◀ ", passive),
-        Span::raw(" "),
-        Span::styled(
-            match player.status {
-                PlaybackStatus::Playing => " ▌▌ ",
-                PlaybackStatus::Paused | PlaybackStatus::Stopped => " ▶ ",
-            },
-            accent,
-        ),
-        Span::raw(" "),
-        Span::styled(" ▶▶ ", passive),
-        Span::raw(" "),
-        Span::styled(" ■ ", passive),
+        Line::from(vec![Span::styled(
+            "XP GLASS",
+            Style::default()
+                .fg(XP_TEXT_LIGHT)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![Span::styled(
+            glyph,
+            Style::default()
+                .fg(XP_HIGHLIGHT)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        make_signature_line(player, 8),
+        Line::from(vec![Span::styled(
+            format!(" {:>3.0}% VOL ", player.volume * 100.0),
+            Style::default()
+                .fg(badge_fg)
+                .bg(badge_bg)
+                .add_modifier(Modifier::BOLD),
+        )]),
     ]
 }
 
-fn label_span(label: &str) -> Span<'static> {
+fn chip(text: impl Into<String>, fg: Color, bg: Color) -> Span<'static> {
     Span::styled(
-        label.to_string(),
-        Style::default()
-            .fg(XP_BLUE_DEEP)
-            .add_modifier(Modifier::BOLD),
+        format!(" {} ", text.into()),
+        Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
     )
 }
 
-fn track_details(player: &PlayerState) -> TrackDetails {
-    let Some(track) = player.current_track.as_ref() else {
-        return TrackDetails {
-            title: String::from("Drop into the library and press Enter"),
-            artist: String::from("Library idle"),
-            album: String::from("No folder selected"),
-            extension: String::from("--"),
+fn meter_line(
+    label: &str,
+    ratio: f64,
+    width: usize,
+    active_color: Color,
+    inactive_color: Color,
+) -> Line<'static> {
+    let width = width.max(8);
+    let ratio = ratio.clamp(0.0, 1.0);
+    let filled = (ratio * width as f64).round() as usize;
+
+    let mut spans = vec![Span::styled(
+        format!(" {} ", label.to_uppercase()),
+        Style::default()
+            .fg(XP_BLUE_DEEP)
+            .add_modifier(Modifier::BOLD),
+    )];
+
+    for index in 0..width {
+        let (ch, color) = if index < filled {
+            ('█', active_color)
+        } else {
+            ('░', inactive_color)
         };
+        spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
+    }
+
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(
+        format!("{:>3.0}%", ratio * 100.0),
+        Style::default().fg(XP_TEXT_DARK),
+    ));
+
+    Line::from(spans)
+}
+
+fn transport_line(player: &PlayerState) -> Line<'static> {
+    let center_label = match player.status {
+        PlaybackStatus::Playing => "PAUSE",
+        PlaybackStatus::Paused | PlaybackStatus::Stopped => "PLAY",
+    };
+    let center_bg = match player.status {
+        PlaybackStatus::Playing => XP_HIGHLIGHT,
+        PlaybackStatus::Paused | PlaybackStatus::Stopped => XP_MINT,
     };
 
-    let title = track
-        .path
-        .file_stem()
-        .map(|value| clean_label(&value.to_string_lossy()))
-        .unwrap_or_else(|| clean_label(&track.title));
-    let album = track
-        .path
-        .parent()
-        .and_then(|path| path.file_name())
-        .map(|value| clean_label(&value.to_string_lossy()))
-        .unwrap_or_else(|| String::from("Unknown folder"));
-    let artist = track
-        .path
-        .parent()
-        .and_then(|path| path.parent())
-        .and_then(|path| path.file_name())
-        .map(|value| clean_label(&value.to_string_lossy()))
-        .filter(|value| value != &album)
-        .unwrap_or_else(|| String::from("Library"));
-    let extension = track
-        .path
-        .extension()
-        .map(|value| value.to_string_lossy().to_uppercase())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| String::from("AUDIO"));
+    Line::from(vec![
+        chip("◄◄", XP_TEXT_DARK, XP_PANEL),
+        Span::raw(" "),
+        chip(center_label, XP_TEXT_DARK, center_bg),
+        Span::raw(" "),
+        chip("►►", XP_TEXT_DARK, XP_PANEL),
+        Span::raw(" "),
+        chip(
+            player
+                .duration
+                .map(format_duration)
+                .unwrap_or_else(|| String::from("--:--")),
+            XP_TEXT_LIGHT,
+            XP_BLUE_DEEP,
+        ),
+    ])
+}
 
-    TrackDetails {
-        title,
-        artist,
-        album,
-        extension,
+fn info_message_line(player: &PlayerState, width: usize) -> Line<'static> {
+    match &player.last_error {
+        Some(error) => Line::from(vec![
+            Span::styled(
+                " Error ",
+                Style::default()
+                    .fg(XP_TEXT_LIGHT)
+                    .bg(XP_RED)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                fit_text(error, width.saturating_sub(9)),
+                Style::default().fg(XP_RED),
+            ),
+        ]),
+        None => Line::from(vec![
+            Span::styled(
+                " Signal ",
+                Style::default()
+                    .fg(XP_TEXT_LIGHT)
+                    .bg(XP_BLUE_DEEP)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                fit_text(playback_mood(player), width.saturating_sub(10)),
+                Style::default().fg(XP_BLUE),
+            ),
+        ]),
     }
 }
 
-fn clean_label(raw: &str) -> String {
-    let text = raw.replace('_', " ");
-    let text = text
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_string();
-
-    if text.is_empty() {
-        String::from("Untitled")
-    } else {
-        text
-    }
-}
-
-fn tail_clip(text: &str, width: usize) -> String {
-    if width == 0 {
+fn fit_text(text: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
         return String::new();
     }
 
-    let chars = text.chars().collect::<Vec<_>>();
-    if chars.len() <= width {
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
         return text.to_string();
     }
 
-    if width <= 3 {
-        return "…".repeat(width);
+    if max_chars == 1 {
+        return String::from("…");
     }
 
-    let tail = chars
-        .into_iter()
-        .rev()
-        .take(width - 1)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<String>();
-    format!("…{tail}")
+    let truncated = text.chars().take(max_chars - 1).collect::<String>();
+    format!("{truncated}…")
 }
 
-fn marquee_text(text: &str, width: usize, phase: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
+fn track_seed(player: &PlayerState) -> u64 {
+    let title_seed = player
+        .current_track
+        .as_ref()
+        .map(|track| {
+            track.title.bytes().fold(0_u64, |acc, byte| {
+                acc.wrapping_mul(131).wrapping_add(byte as u64)
+            })
+        })
+        .unwrap_or(17);
 
-    let chars = text.chars().collect::<Vec<_>>();
-    if chars.len() <= width {
-        return text.to_string();
-    }
-
-    let gap = 5;
-    let mut extended = chars.clone();
-    extended.extend(std::iter::repeat_n(' ', gap));
-    extended.extend(chars.iter().copied());
-    let cycle = chars.len() + gap;
-    let start = phase % cycle;
-
-    extended.into_iter().skip(start).take(width).collect()
+    let duration_seed = player
+        .duration
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    title_seed ^ duration_seed.rotate_left(7)
 }
 
-fn volume_meter(volume: f32, width: usize) -> String {
-    let width = width.max(1);
-    let filled = (volume.clamp(0.0, 1.0) * width as f32).round() as usize;
-    let filled = filled.min(width);
-    let mut meter = String::with_capacity(width);
-
-    for index in 0..width {
-        meter.push(if index < filled { '█' } else { '░' });
-    }
-
-    meter
-}
-
-fn animation_phase(player: &PlayerState, step_ms: u128) -> usize {
-    if matches!(player.status, PlaybackStatus::Stopped) {
-        0
-    } else {
-        (player.position.as_millis() / step_ms) as usize
+fn playback_energy(player: &PlayerState) -> f64 {
+    match player.status {
+        PlaybackStatus::Playing => 0.52 + (player.volume as f64 * 0.38),
+        PlaybackStatus::Paused => 0.26 + (player.volume as f64 * 0.08),
+        PlaybackStatus::Stopped => 0.12,
     }
 }
 
-fn make_spectrum_line(player: &PlayerState, width: usize) -> Line<'static> {
-    let width = width.max(16);
-    let phase = player.position.as_secs_f64() * 4.6;
-    let chars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+fn make_signature_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let width = width.max(6);
+    let seed = track_seed(player) as f64 * 0.019;
+    let energy = playback_energy(player);
+    let phase = match player.status {
+        PlaybackStatus::Stopped => 0.0,
+        PlaybackStatus::Paused => player.position.as_secs_f64() * 1.7,
+        PlaybackStatus::Playing => player.position.as_secs_f64() * 4.0,
+    };
+    let chars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇'];
+
     let mut spans = Vec::with_capacity(width);
-
     for index in 0..width {
         let x = index as f64 / width as f64;
-        let energy =
-            ((x * 18.0 + phase).sin() * 0.55 + (x * 33.0 + phase * 0.6).cos() * 0.35 + 1.0) / 2.0;
-        let idx = (energy.clamp(0.0, 1.0) * (chars.len() - 1) as f64).round() as usize;
-        let color = if energy > 0.72 {
+        let wave = ((x * 10.0 + phase + seed).sin() * 0.6 + (x * 21.0 - seed).cos() * 0.4) * energy;
+        let normalized = ((wave + 1.0) / 2.0).clamp(0.0, 1.0);
+        let char_index = (normalized * (chars.len() - 1) as f64).round() as usize;
+        let color = if normalized > 0.72 {
             XP_HIGHLIGHT
-        } else if energy > 0.48 {
+        } else if normalized > 0.48 {
             XP_MINT
         } else {
             XP_SKY
         };
         spans.push(Span::styled(
-            chars[idx].to_string(),
+            chars[char_index].to_string(),
             Style::default().fg(color),
         ));
     }
@@ -857,32 +794,93 @@ fn make_spectrum_line(player: &PlayerState, width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-fn make_wave_line(
-    player: &PlayerState,
-    width: usize,
-    speed: f64,
-    phase_offset: f64,
-    palette: [Color; 3],
-) -> Line<'static> {
+fn make_spectrum_lines(player: &PlayerState, width: usize, rows: usize) -> Vec<Line<'static>> {
     let width = width.max(16);
-    let phase = player.position.as_secs_f64() * speed + phase_offset;
+    let rows = rows.max(2);
+    let energy = playback_energy(player);
+    let seed = track_seed(player) as f64 * 0.013;
+    let progress = progress_info(player).0;
+    let phase = match player.status {
+        PlaybackStatus::Stopped => 0.0,
+        PlaybackStatus::Paused => player.position.as_secs_f64() * 1.8,
+        PlaybackStatus::Playing => player.position.as_secs_f64() * (3.6 + progress * 2.2),
+    };
+
+    let heights = (0..width)
+        .map(|index| {
+            let x = index as f64 / width as f64;
+            let wave_a = (x * 13.0 + phase + seed).sin();
+            let wave_b = (x * 25.0 - phase * 0.7 + seed * 0.4).cos() * 0.55;
+            let wave_c = ((index as f64 * 0.33) + phase * 1.3 + seed).sin() * 0.2;
+            let pulse = ((phase * 0.75 + x * 4.0).sin() * 0.5 + 0.5) * 0.18;
+            let normalized = (((wave_a + wave_b + wave_c) * 0.5) + 0.5).clamp(0.0, 1.0);
+            let boosted =
+                (normalized * 0.7 + energy * 0.2 + pulse + progress * 0.1).clamp(0.0, 1.0);
+            ((boosted * rows as f64).ceil() as usize).min(rows)
+        })
+        .collect::<Vec<_>>();
+
+    (1..=rows)
+        .rev()
+        .map(|level| {
+            let color = match rows - level {
+                0 => XP_HIGHLIGHT,
+                1 => XP_MINT,
+                2 => XP_GLASS,
+                _ => XP_SKY,
+            };
+
+            let spans = heights
+                .iter()
+                .enumerate()
+                .map(|(index, height)| {
+                    if *height >= level {
+                        Span::styled("█".to_string(), Style::default().fg(color))
+                    } else if level == 1 && index % 6 == 0 {
+                        Span::styled("·".to_string(), Style::default().fg(XP_PANEL_DARK))
+                    } else {
+                        Span::styled(" ".to_string(), Style::default().fg(XP_PANEL_DARK))
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            Line::from(spans)
+        })
+        .collect()
+}
+
+fn make_wave_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let width = width.max(12);
+    let seed = track_seed(player) as f64 * 0.011;
+    let energy = playback_energy(player);
+    let progress = progress_info(player).0;
+    let phase = match player.status {
+        PlaybackStatus::Stopped => 0.0,
+        PlaybackStatus::Paused => player.position.as_secs_f64() * 2.2,
+        PlaybackStatus::Playing => player.position.as_secs_f64() * (5.2 + progress * 1.8),
+    };
+
     let chars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
     let mut spans = Vec::with_capacity(width);
 
     for index in 0..width {
         let x = index as f64 / width as f64;
-        let base = ((x * 11.0 + phase).sin() + (x * 26.0 + phase * 0.7).sin() * 0.45) * 0.5;
-        let normalized = ((base + 1.0) / 2.0).clamp(0.0, 1.0);
-        let idx = (normalized * (chars.len() - 1) as f64).round() as usize;
-        let color = if normalized > 0.72 {
-            palette[2]
-        } else if normalized > 0.45 {
-            palette[1]
+        let base = (x * 11.0 + phase + seed).sin() * 0.58
+            + (x * 27.0 - phase * 0.65 + seed * 0.7).cos() * 0.24
+            + (progress * 6.0 + x * 3.0).sin() * 0.18;
+        let normalized = (((base * energy) + 1.0) / 2.0).clamp(0.0, 1.0);
+        let char_index = (normalized * (chars.len() - 1) as f64).round() as usize;
+        let color = if normalized > 0.78 {
+            XP_HIGHLIGHT
+        } else if normalized > 0.5 {
+            XP_MINT
+        } else if normalized > 0.26 {
+            XP_SKY
         } else {
-            palette[0]
+            XP_PANEL
         };
         spans.push(Span::styled(
-            chars[idx].to_string(),
+            chars[char_index].to_string(),
             Style::default().fg(color),
         ));
     }
@@ -891,31 +889,25 @@ fn make_wave_line(
 }
 
 fn make_glow_line(player: &PlayerState, width: usize) -> Line<'static> {
-    let width = width.max(16);
-    let sweep = if matches!(player.status, PlaybackStatus::Stopped) {
-        width / 3
+    let width = width.max(12);
+    let (progress, _) = progress_info(player);
+    let phase = if player.status == PlaybackStatus::Stopped {
+        width / 4
     } else {
-        ((player.position.as_millis() / 80) as usize) % width
+        (((progress * width as f64) + player.position.as_secs_f64() * 6.0).round() as usize) % width
     };
 
     let mut spans = Vec::with_capacity(width);
     for index in 0..width {
-        let distance = index.abs_diff(sweep);
-        let ch = if distance == 0 {
-            '✦'
+        let distance = index.abs_diff(phase);
+        let (ch, color) = if distance == 0 {
+            ('◉', XP_HIGHLIGHT)
         } else if distance <= 2 {
-            '•'
+            ('•', XP_SILVER)
         } else if distance <= 5 {
-            '·'
+            ('·', XP_PANEL_DARK)
         } else {
-            ' '
-        };
-        let color = if distance == 0 {
-            XP_HIGHLIGHT
-        } else if distance <= 2 {
-            XP_SILVER
-        } else {
-            XP_PANEL_DARK
+            ('·', XP_BLUE_MID)
         };
         spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
     }
@@ -923,39 +915,49 @@ fn make_glow_line(player: &PlayerState, width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-fn make_reflection_line(player: &PlayerState, width: usize) -> Line<'static> {
-    let width = width.max(16);
-    let phase = player.position.as_secs_f64() * 3.2;
-    let mut spans = Vec::with_capacity(width);
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
 
-    for index in 0..width {
-        let x = index as f64 / width as f64;
-        let normalized = (((x * 9.0 + phase).cos() * 0.6) + 1.0) / 2.0;
-        let ch = if normalized > 0.76 {
-            '▀'
-        } else if normalized > 0.52 {
-            '▔'
-        } else if normalized > 0.34 {
-            '·'
-        } else {
-            ' '
-        };
-        let color = if matches!(player.status, PlaybackStatus::Stopped) {
-            XP_PANEL_DARK
-        } else if normalized > 0.68 {
-            XP_SKY
-        } else {
-            XP_PANEL_DARK
-        };
-        spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
+    use super::*;
+    use crate::audio_engine::Track;
+
+    fn sample_player() -> PlayerState {
+        PlayerState {
+            status: PlaybackStatus::Playing,
+            current_track: Some(Track {
+                path: PathBuf::from("song.wav"),
+                title: String::from("Ocean Avenue After Midnight"),
+            }),
+            volume: 0.82,
+            position: Duration::from_secs(73),
+            duration: Some(Duration::from_secs(212)),
+            queue: vec![
+                PathBuf::from("one.wav"),
+                PathBuf::from("two.wav"),
+                PathBuf::from("three.wav"),
+            ],
+            queue_index: Some(1),
+            last_error: None,
+        }
     }
 
-    Line::from(spans)
-}
+    #[test]
+    fn fit_text_adds_ellipsis_when_needed() {
+        assert_eq!(fit_text("abcdef", 4), "abc…");
+        assert_eq!(fit_text("ok", 8), "ok");
+    }
 
-struct TrackDetails {
-    title: String,
-    artist: String,
-    album: String,
-    extension: String,
+    #[test]
+    fn spectrum_lines_match_requested_geometry() {
+        let lines = make_spectrum_lines(&sample_player(), 18, 4);
+        assert_eq!(lines.len(), 4);
+        assert!(lines.iter().all(|line| line.spans.len() == 18));
+    }
+
+    #[test]
+    fn wave_line_enforces_minimum_width() {
+        let line = make_wave_line(&sample_player(), 4);
+        assert_eq!(line.spans.len(), 12);
+    }
 }
