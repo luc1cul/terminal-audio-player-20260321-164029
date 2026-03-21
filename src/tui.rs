@@ -511,81 +511,73 @@ fn render_keys(frame: &mut ratatui::Frame<'_>, area: Rect) {
 }
 
 fn render_queue(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
-    let lines = if player.queue.is_empty() {
-        vec![Line::from(vec![Span::styled(
-            " Queue is empty — pick a track from the library.",
-            Style::default().fg(XP_TEXT_DARK),
-        )])]
-    } else {
-        let current_index = player.queue_index.unwrap_or(0);
-        let start = current_index.saturating_sub(2);
-        let end = (start + 5).min(player.queue.len());
-        let width = area.width.saturating_sub(9) as usize;
+    let block = xp_panel(" Queue Preview ", false);
+    frame.render_widget(block, area);
 
-        player.queue[start..end]
-            .iter()
-            .enumerate()
-            .map(|(offset, path)| {
-                let absolute_index = start + offset;
-                let name = path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string());
-                let style = if Some(absolute_index) == player.queue_index {
-                    Style::default()
-                        .fg(XP_TEXT_LIGHT)
-                        .bg(XP_BLUE_MID)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(XP_TEXT_DARK)
-                };
+    let inner = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    if inner.width < 20 || inner.height < 4 {
+        return;
+    }
 
-                let prefix = if Some(absolute_index) == player.queue_index {
-                    "▶"
-                } else {
-                    "•"
-                };
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(2),
+            Constraint::Length(1),
+        ])
+        .split(inner);
 
-                Line::from(vec![Span::styled(
-                    format!(
-                        " {prefix} {:>2}. {}",
-                        absolute_index + 1,
-                        fit_text(&name, width)
-                    ),
-                    style,
-                )])
-            })
-            .collect()
-    };
+    let summary = Paragraph::new(queue_summary_line(player)).style(Style::default().bg(XP_SILVER));
+    frame.render_widget(summary, rows[0]);
 
-    let widget = Paragraph::new(lines)
-        .block(xp_panel(" Queue Preview ", false))
+    let queue_lines = queue_lines(player, rows[1].width as usize);
+    let queue_widget = Paragraph::new(queue_lines)
+        .style(Style::default().bg(XP_SILVER))
         .wrap(Wrap { trim: false });
-    frame.render_widget(widget, area);
+    frame.render_widget(queue_widget, rows[1]);
+
+    let footer = Paragraph::new(queue_footer_line(player, rows[2].width as usize))
+        .style(Style::default().bg(XP_SILVER));
+    frame.render_widget(footer, rows[2]);
 }
 
 fn render_status_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
-    let status = Paragraph::new(Line::from(vec![
-        Span::styled(
-            " Status ",
-            Style::default()
-                .fg(XP_TEXT_LIGHT)
-                .bg(XP_BLUE_DEEP)
-                .add_modifier(Modifier::BOLD),
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(XP_BLUE_DEEP))
+        .style(Style::default().bg(XP_SILVER));
+    frame.render_widget(block, area);
+
+    let inner = area.inner(Margin {
+        vertical: 0,
+        horizontal: 1,
+    });
+    if inner.width < 24 {
+        return;
+    }
+
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(46), Constraint::Min(12)])
+        .split(inner);
+
+    let left = Paragraph::new(status_chip_line(app)).style(Style::default().bg(XP_SILVER));
+    frame.render_widget(left, columns[0]);
+
+    let message = Paragraph::new(Line::from(vec![Span::styled(
+        fit_text(
+            app.status_line(),
+            columns[1].width.saturating_sub(1) as usize,
         ),
-        Span::raw(" "),
-        Span::styled(
-            fit_text(app.status_line(), area.width.saturating_sub(12) as usize),
-            Style::default().fg(XP_TEXT_DARK),
-        ),
-    ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(XP_BLUE_DEEP))
-            .style(Style::default().bg(XP_SILVER)),
-    );
-    frame.render_widget(status, area);
+        Style::default().fg(XP_TEXT_DARK),
+    )]))
+    .alignment(Alignment::Right)
+    .style(Style::default().bg(XP_SILVER));
+    frame.render_widget(message, columns[1]);
 }
 
 fn xp_panel(title: &str, focused: bool) -> Block<'static> {
@@ -730,6 +722,150 @@ fn display_relative_path(root: &Path, path: &Path) -> String {
                 label
             }
         })
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+fn status_chip_line(app: &App) -> Line<'static> {
+    let focus_chip = match app.focus() {
+        FocusPane::Browser => chip("LIB", XP_TEXT_DARK, XP_HIGHLIGHT),
+        FocusPane::Player => chip("PLAYER", XP_TEXT_LIGHT, XP_BLUE_MID),
+    };
+    let state_chip = match app.player().status {
+        PlaybackStatus::Playing => chip("PLAY", XP_TEXT_DARK, XP_MINT),
+        PlaybackStatus::Paused => chip("PAUSE", XP_TEXT_DARK, XP_HIGHLIGHT),
+        PlaybackStatus::Stopped => chip("STOP", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+    };
+    let queue_text = match (app.player().queue_index, app.player().queue.is_empty()) {
+        (Some(index), false) => format!("Q {}/{}", index + 1, app.player().queue.len()),
+        _ => String::from("Q 0/0"),
+    };
+
+    Line::from(vec![
+        chip("STATUS", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+        Span::raw(" "),
+        focus_chip,
+        Span::raw(" "),
+        state_chip,
+        Span::raw(" "),
+        chip(
+            format!("VOL {:>3.0}%", app.player().volume * 100.0),
+            XP_TEXT_DARK,
+            XP_PANEL,
+        ),
+        Span::raw(" "),
+        chip(queue_text, XP_TEXT_DARK, XP_SILVER),
+    ])
+}
+
+fn queue_summary_line(player: &PlayerState) -> Line<'static> {
+    match (player.queue_index, player.queue.is_empty()) {
+        (_, true) => Line::from(vec![
+            chip("EMPTY", XP_TEXT_DARK, XP_PANEL),
+            Span::raw(" "),
+            chip("PICK A TRACK", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+        ]),
+        (Some(index), false) => {
+            let remaining = player.queue.len().saturating_sub(index + 1);
+            Line::from(vec![
+                chip(
+                    format!("NOW {}/{}", index + 1, player.queue.len()),
+                    XP_TEXT_DARK,
+                    XP_HIGHLIGHT,
+                ),
+                Span::raw(" "),
+                chip(format!("NEXT {remaining}"), XP_TEXT_DARK, XP_MINT),
+                Span::raw(" "),
+                chip(format_duration(player.position), XP_TEXT_LIGHT, XP_BLUE_MID),
+            ])
+        }
+        (None, false) => Line::from(vec![
+            chip("QUEUE LOADED", XP_TEXT_DARK, XP_PANEL),
+            Span::raw(" "),
+            chip("READY TO PLAY", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+        ]),
+    }
+}
+
+fn queue_lines(player: &PlayerState, width: usize) -> Vec<Line<'static>> {
+    if player.queue.is_empty() {
+        return vec![Line::from(vec![Span::styled(
+            " Queue is empty — pick a track from the library.",
+            Style::default().fg(XP_TEXT_DARK),
+        )])];
+    }
+
+    let current_index = player.queue_index.unwrap_or(0);
+    let start = current_index.saturating_sub(2);
+    let end = (start + 6).min(player.queue.len());
+    let width = width.saturating_sub(14).max(8);
+
+    player.queue[start..end]
+        .iter()
+        .enumerate()
+        .map(|(offset, path)| {
+            let absolute_index = start + offset;
+            let name = queue_track_name(path);
+            let (label, style) = if Some(absolute_index) == player.queue_index {
+                (
+                    " NOW ",
+                    Style::default()
+                        .fg(XP_TEXT_LIGHT)
+                        .bg(XP_BLUE_MID)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else if absolute_index == current_index.saturating_add(1) {
+                (
+                    " NEXT",
+                    Style::default()
+                        .fg(XP_TEXT_DARK)
+                        .bg(XP_MINT)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else if absolute_index < current_index {
+                (" PREV", Style::default().fg(XP_BLUE_DEEP).bg(XP_PANEL))
+            } else {
+                (" LATE", Style::default().fg(XP_TEXT_LIGHT).bg(XP_BLUE_DEEP))
+            };
+
+            Line::from(vec![
+                Span::styled(label, style),
+                Span::raw(" "),
+                Span::styled(
+                    format!("{:>2}.", absolute_index + 1),
+                    Style::default().fg(XP_BLUE_DEEP),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    fit_text(&name, width),
+                    if Some(absolute_index) == player.queue_index {
+                        Style::default()
+                            .fg(XP_TEXT_DARK)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(XP_TEXT_DARK)
+                    },
+                ),
+            ])
+        })
+        .collect()
+}
+
+fn queue_footer_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let text = if player.queue.is_empty() {
+        "Enter from the library builds the active playback order."
+    } else {
+        "n/p moves through the queue · Enter from library re-roots playback order."
+    };
+
+    Line::from(vec![Span::styled(
+        fit_text(text, width),
+        Style::default().fg(XP_BLUE),
+    )])
+}
+
+fn queue_track_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
 }
 
