@@ -150,6 +150,10 @@ impl FileBrowser {
         self.audio_playlist_cache.clone()
     }
 
+    pub fn playlist_len(&self) -> usize {
+        self.audio_playlist_cache.len()
+    }
+
     fn refresh(&mut self) -> io::Result<()> {
         let mut visible_entries = Vec::new();
         self.collect_children(&self.root, 0, &mut visible_entries)?;

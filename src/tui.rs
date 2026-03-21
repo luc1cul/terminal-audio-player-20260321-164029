@@ -1,4 +1,5 @@
 use std::io;
+use std::path::Path;
 use std::time::Duration;
 
 use crossterm::{
@@ -154,6 +155,22 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         FocusPane::Player => format!(" Media Library ◇ {root_label}"),
     };
 
+    let shell = xp_panel(&title, app.focus() == FocusPane::Browser);
+    frame.render_widget(shell, area);
+
+    let inner = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    if inner.width < 18 || inner.height < 10 {
+        return;
+    }
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(6), Constraint::Length(8)])
+        .split(inner);
+
     let entries = app.browser().entries();
     let items = if entries.is_empty() {
         vec![ListItem::new(Line::from(vec![Span::styled(
@@ -165,7 +182,13 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     };
 
     let list = List::new(items)
-        .block(xp_panel(&title, app.focus() == FocusPane::Browser))
+        .block(
+            Block::default()
+                .title(" Navigator ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(XP_SKY))
+                .style(Style::default().bg(XP_SILVER)),
+        )
         .highlight_symbol("▸ ")
         .highlight_style(
             Style::default()
@@ -179,7 +202,97 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         state.select(Some(app.browser().selected_index()));
     }
 
-    frame.render_stateful_widget(list, area, &mut state);
+    frame.render_stateful_widget(list, sections[0], &mut state);
+    render_browser_inspector(frame, app, sections[1]);
+}
+
+fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
+    let entries = app.browser().entries();
+    let selected = app.browser().selected_entry();
+    let (directory_count, visible_file_count) = browser_counts(entries);
+    let playlist_count = app.browser().playlist_len();
+    let selection_name = selected
+        .map(|entry| entry.name.clone())
+        .unwrap_or_else(|| String::from("Nothing selected"));
+    let selection_path = selected
+        .map(|entry| display_relative_path(app.browser().root(), &entry.path))
+        .unwrap_or_else(|| String::from("."));
+    let focus_hint = match app.focus() {
+        FocusPane::Browser => "browse lane active · j/k move · Enter open/play",
+        FocusPane::Player => "player lane active · Tab to return to library",
+    };
+
+    let lines = vec![
+        Line::from(vec![
+            browser_kind_chip(selected),
+            Span::raw(" "),
+            browser_state_chip(selected),
+            Span::raw(" "),
+            chip(format!("{directory_count} DIR"), XP_TEXT_DARK, XP_PANEL),
+            Span::raw(" "),
+            chip(
+                format!("{playlist_count} TRACK"),
+                XP_TEXT_DARK,
+                XP_HIGHLIGHT,
+            ),
+        ]),
+        Line::from(vec![
+            browser_label("Selection"),
+            Span::styled(
+                fit_text(&selection_name, area.width.saturating_sub(15) as usize),
+                Style::default()
+                    .fg(XP_TEXT_DARK)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            browser_label("Path"),
+            Span::styled(
+                fit_text(&selection_path, area.width.saturating_sub(10) as usize),
+                Style::default().fg(XP_BLUE),
+            ),
+        ]),
+        meter_line(
+            "depth",
+            browser_depth_ratio(entries, selected),
+            area.width.saturating_sub(18) as usize,
+            XP_BLUE_MID,
+            XP_PANEL_DARK,
+        ),
+        Line::from(vec![
+            browser_label("Action"),
+            Span::styled(
+                fit_text(
+                    browser_action_hint(selected),
+                    area.width.saturating_sub(12) as usize,
+                ),
+                Style::default().fg(XP_TEXT_DARK),
+            ),
+        ]),
+        Line::from(vec![
+            browser_label("Focus"),
+            Span::styled(
+                fit_text(focus_hint, area.width.saturating_sub(11) as usize),
+                Style::default().fg(XP_BLUE),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                format!("{visible_file_count} visible files"),
+                Style::default().fg(XP_PANEL_DARK),
+            ),
+        ]),
+    ];
+
+    let widget = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .title(" Inspector ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(XP_SKY))
+                .style(Style::default().bg(XP_SILVER)),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(widget, area);
 }
 
 fn render_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
@@ -500,24 +613,124 @@ fn xp_panel(title: &str, focused: bool) -> Block<'static> {
 }
 
 fn browser_item(entry: &BrowserEntry) -> ListItem<'static> {
-    let indent = "  ".repeat(entry.depth);
-    let icon = match entry.kind {
-        EntryKind::Directory if entry.expanded => "▾",
-        EntryKind::Directory => "▸",
-        EntryKind::File => "♪",
+    let mut spans = Vec::with_capacity(entry.depth + 3);
+    for _ in 0..entry.depth {
+        spans.push(Span::styled("│ ", Style::default().fg(XP_PANEL_DARK)));
+    }
+
+    let (icon, icon_color, name_style) = match entry.kind {
+        EntryKind::Directory if entry.expanded => (
+            "▾",
+            XP_MINT,
+            Style::default()
+                .fg(XP_BLUE_DEEP)
+                .add_modifier(Modifier::BOLD),
+        ),
+        EntryKind::Directory => (
+            "▸",
+            XP_BLUE_MID,
+            Style::default()
+                .fg(XP_BLUE_DEEP)
+                .add_modifier(Modifier::BOLD),
+        ),
+        EntryKind::File => ("♪", XP_HIGHLIGHT, Style::default().fg(XP_TEXT_DARK)),
     };
 
-    let style = match entry.kind {
-        EntryKind::Directory => Style::default()
+    spans.push(Span::styled(
+        format!("{icon} "),
+        Style::default().fg(icon_color).add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::styled(entry.name.clone(), name_style));
+
+    if entry.kind == EntryKind::File {
+        if let Some(extension) = entry.path.extension().and_then(|ext| ext.to_str()) {
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                extension.to_ascii_uppercase(),
+                Style::default().fg(XP_BLUE_MID),
+            ));
+        }
+    }
+
+    ListItem::new(Line::from(spans))
+}
+
+fn browser_counts(entries: &[BrowserEntry]) -> (usize, usize) {
+    entries
+        .iter()
+        .fold((0, 0), |(directories, files), entry| match entry.kind {
+            EntryKind::Directory => (directories + 1, files),
+            EntryKind::File => (directories, files + 1),
+        })
+}
+
+fn browser_label(text: &str) -> Span<'static> {
+    Span::styled(
+        format!(" {text:<9}"),
+        Style::default()
             .fg(XP_BLUE_DEEP)
             .add_modifier(Modifier::BOLD),
-        EntryKind::File => Style::default().fg(XP_TEXT_DARK),
-    };
+    )
+}
 
-    ListItem::new(Line::from(vec![
-        Span::raw(indent),
-        Span::styled(format!("{icon} {}", entry.name), style),
-    ]))
+fn browser_kind_chip(entry: Option<&BrowserEntry>) -> Span<'static> {
+    match entry.map(|entry| entry.kind) {
+        Some(EntryKind::Directory) => chip("FOLDER", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+        Some(EntryKind::File) => chip("TRACK", XP_TEXT_DARK, XP_MINT),
+        None => chip("EMPTY", XP_TEXT_DARK, XP_PANEL),
+    }
+}
+
+fn browser_state_chip(entry: Option<&BrowserEntry>) -> Span<'static> {
+    match entry {
+        Some(entry) if entry.kind == EntryKind::Directory && entry.expanded => {
+            chip("OPEN", XP_TEXT_DARK, XP_MINT)
+        }
+        Some(entry) if entry.kind == EntryKind::Directory => {
+            chip("CLOSED", XP_TEXT_LIGHT, XP_BLUE_MID)
+        }
+        Some(_) => chip("READY", XP_TEXT_LIGHT, XP_BLUE),
+        None => chip("IDLE", XP_TEXT_LIGHT, XP_BLUE_MID),
+    }
+}
+
+fn browser_action_hint(entry: Option<&BrowserEntry>) -> &'static str {
+    match entry {
+        Some(entry) if entry.kind == EntryKind::Directory && entry.expanded => {
+            "Enter toggles folder · ← collapses upward"
+        }
+        Some(entry) if entry.kind == EntryKind::Directory => "Enter or → opens folder contents",
+        Some(_) => "Enter starts playback from this track",
+        None => "Point the player at a folder with supported audio",
+    }
+}
+
+fn browser_depth_ratio(entries: &[BrowserEntry], selected: Option<&BrowserEntry>) -> f64 {
+    let depth_ceiling = entries
+        .iter()
+        .map(|entry| entry.depth + 1)
+        .max()
+        .unwrap_or(1);
+    let selected_depth = selected.map(|entry| entry.depth + 1).unwrap_or(0);
+    (selected_depth as f64 / depth_ceiling as f64).clamp(0.0, 1.0)
+}
+
+fn display_relative_path(root: &Path, path: &Path) -> String {
+    if path == root {
+        return String::from(".");
+    }
+
+    path.strip_prefix(root)
+        .ok()
+        .map(|relative| {
+            let label = relative.display().to_string();
+            if label.is_empty() {
+                String::from(".")
+            } else {
+                label
+            }
+        })
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 fn help_lines() -> Vec<Line<'static>> {
@@ -917,7 +1130,7 @@ fn make_glow_line(player: &PlayerState, width: usize) -> Line<'static> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use super::*;
     use crate::audio_engine::Track;
@@ -959,5 +1172,45 @@ mod tests {
     fn wave_line_enforces_minimum_width() {
         let line = make_wave_line(&sample_player(), 4);
         assert_eq!(line.spans.len(), 12);
+    }
+
+    #[test]
+    fn browser_counts_split_directories_and_files() {
+        let entries = vec![
+            BrowserEntry {
+                path: PathBuf::from("music"),
+                name: String::from("music"),
+                depth: 0,
+                kind: EntryKind::Directory,
+                expanded: true,
+            },
+            BrowserEntry {
+                path: PathBuf::from("music/song.mp3"),
+                name: String::from("song.mp3"),
+                depth: 1,
+                kind: EntryKind::File,
+                expanded: false,
+            },
+            BrowserEntry {
+                path: PathBuf::from("music/album"),
+                name: String::from("album"),
+                depth: 1,
+                kind: EntryKind::Directory,
+                expanded: false,
+            },
+        ];
+
+        assert_eq!(browser_counts(&entries), (2, 1));
+    }
+
+    #[test]
+    fn display_relative_path_prefers_root_relative_form() {
+        let root = Path::new("/music");
+        let child = Path::new("/music/ambient/dreams/song.flac");
+        assert_eq!(
+            display_relative_path(root, child),
+            "ambient/dreams/song.flac"
+        );
+        assert_eq!(display_relative_path(root, root), ".");
     }
 }
