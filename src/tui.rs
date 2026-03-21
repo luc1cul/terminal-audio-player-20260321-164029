@@ -189,7 +189,7 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 .border_style(Style::default().fg(XP_SKY))
                 .style(Style::default().bg(XP_SILVER)),
         )
-        .highlight_symbol("▸ ")
+        .highlight_symbol("◆ ")
         .highlight_style(
             Style::default()
                 .fg(XP_TEXT_LIGHT)
@@ -209,7 +209,7 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
 fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     let entries = app.browser().entries();
     let selected = app.browser().selected_entry();
-    let (directory_count, visible_file_count) = browser_counts(entries);
+    let (directory_count, _visible_file_count) = browser_counts(entries);
     let playlist_count = app.browser().playlist_len();
     let selection_name = selected
         .map(|entry| entry.name.clone())
@@ -274,11 +274,6 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
             Span::styled(
                 fit_text(focus_hint, area.width.saturating_sub(11) as usize),
                 Style::default().fg(XP_BLUE),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                format!("{visible_file_count} visible files"),
-                Style::default().fg(XP_PANEL_DARK),
             ),
         ]),
     ];
