@@ -140,9 +140,10 @@ impl FileBrowser {
             return None;
         }
 
+        let selected_path = canonicalize_lossy(&selected.path);
         let playlist = self.audio_playlist();
-        let index = playlist.iter().position(|path| path == &selected.path)?;
-        Some((selected.path.clone(), playlist, index))
+        let index = playlist.iter().position(|path| path == &selected_path)?;
+        Some((selected_path, playlist, index))
     }
 
     pub fn audio_playlist(&self) -> Vec<PathBuf> {
@@ -171,9 +172,11 @@ impl FileBrowser {
             .filter_map(Result::ok)
             .map(|entry| entry.into_path())
             .filter(|path| path.is_file() && is_audio_file(path))
+            .map(|path| canonicalize_lossy(&path))
             .collect::<Vec<_>>();
 
         sort_paths(&mut playlist);
+        playlist.dedup();
         playlist
     }
 
@@ -193,6 +196,7 @@ impl FileBrowser {
             .filter_map(Result::ok)
             .map(|entry| entry.path())
             .filter(|path| path.is_dir() || is_audio_file(path))
+            .map(|path| canonicalize_lossy(&path))
             .collect::<Vec<_>>();
 
         sort_paths(&mut children);
@@ -230,6 +234,10 @@ fn display_name(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
+}
+
+fn canonicalize_lossy(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn sort_paths(paths: &mut [PathBuf]) {
