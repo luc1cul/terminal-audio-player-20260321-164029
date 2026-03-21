@@ -156,18 +156,28 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
+    let entries = app.browser().entries();
+    let (directory_count, file_count) = browser_counts(entries);
+    let root_name = app
+        .browser()
+        .root()
+        .file_name()
+        .map(|value| clean_label(&value.to_string_lossy()))
+        .unwrap_or_else(|| app.browser().root().display().to_string());
     let title = match app.focus() {
-        FocusPane::Browser => format!(
-            " Media Library ◆ {} tracks visible ",
-            app.browser().entries().len()
-        ),
-        FocusPane::Player => format!(
-            " Media Library ◇ {} tracks visible ",
-            app.browser().entries().len()
-        ),
+        FocusPane::Browser => {
+            format!(" Media Library ◆ {root_name} · {directory_count} dirs · {file_count} files ")
+        }
+        FocusPane::Player => {
+            format!(" Media Library ◇ {root_name} · {directory_count} dirs · {file_count} files ")
+        }
     };
 
-    let entries = app.browser().entries();
+    let columns = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(8), Constraint::Length(6)])
+        .split(area);
+
     let items = if entries.is_empty() {
         vec![ListItem::new(Line::from(vec![Span::styled(
             " No audio files or folders found ",
@@ -192,7 +202,8 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         state.select(Some(app.browser().selected_index()));
     }
 
-    frame.render_stateful_widget(list, area, &mut state);
+    frame.render_stateful_widget(list, columns[0], &mut state);
+    render_browser_summary(frame, app, columns[1], directory_count, file_count);
 }
 
 fn render_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
@@ -508,6 +519,77 @@ fn browser_item(entry: &BrowserEntry) -> ListItem<'static> {
     ]))
 }
 
+fn render_browser_summary(
+    frame: &mut ratatui::Frame<'_>,
+    app: &App,
+    area: Rect,
+    directory_count: usize,
+    file_count: usize,
+) {
+    let selected = app.browser().selected_entry();
+    let selected_name = selected
+        .map(|entry| clean_label(&entry.name))
+        .unwrap_or_else(|| String::from("Nothing selected"));
+    let selected_kind = selected
+        .map(|entry| match entry.kind {
+            EntryKind::Directory => "folder",
+            EntryKind::File => "track",
+        })
+        .unwrap_or("idle");
+    let selected_path = selected
+        .map(|entry| {
+            tail_clip(
+                &entry.path.display().to_string(),
+                area.width.saturating_sub(12) as usize,
+            )
+        })
+        .unwrap_or_else(|| {
+            tail_clip(
+                &app.browser().root().display().to_string(),
+                area.width.saturating_sub(12) as usize,
+            )
+        });
+    let depth = selected.map(|entry| entry.depth).unwrap_or(0);
+
+    let lines = vec![
+        Line::from(vec![
+            label_span(" Selected "),
+            Span::styled(
+                selected_name,
+                Style::default()
+                    .fg(XP_TEXT_DARK)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            label_span(" Kind     "),
+            Span::raw(selected_kind),
+            Span::raw("   "),
+            label_span(" Depth "),
+            Span::raw(depth.to_string()),
+        ]),
+        Line::from(vec![
+            label_span(" Library  "),
+            Span::raw(format!("{directory_count} dirs · {file_count} files")),
+        ]),
+        Line::from(vec![label_span(" Path     "), Span::raw(selected_path)]),
+    ];
+
+    let widget = Paragraph::new(lines)
+        .block(xp_panel(" Selection ", false))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(widget, area);
+}
+
+fn browser_counts(entries: &[BrowserEntry]) -> (usize, usize) {
+    entries
+        .iter()
+        .fold((0, 0), |(directories, files), entry| match entry.kind {
+            EntryKind::Directory => (directories + 1, files),
+            EntryKind::File => (directories, files + 1),
+        })
+}
+
 fn help_lines() -> Vec<Line<'static>> {
     vec![
         Line::from(" Space play-pause · q quit · Tab switch focus ".fg(XP_TEXT_DARK)),
@@ -680,6 +762,31 @@ fn clean_label(raw: &str) -> String {
     } else {
         text
     }
+}
+
+fn tail_clip(text: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+
+    let chars = text.chars().collect::<Vec<_>>();
+    if chars.len() <= width {
+        return text.to_string();
+    }
+
+    if width <= 3 {
+        return "…".repeat(width);
+    }
+
+    let tail = chars
+        .into_iter()
+        .rev()
+        .take(width - 1)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("…{tail}")
 }
 
 fn marquee_text(text: &str, width: usize, phase: usize) -> String {
