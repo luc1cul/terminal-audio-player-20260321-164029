@@ -98,10 +98,18 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &App) {
 
     render_title_bar(frame, app, outer[0]);
 
-    let main = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(39), Constraint::Percentage(61)])
-        .split(outer[1]);
+    let main = if outer[1].width < 110 {
+        let browser_height = if outer[1].height < 22 { 10 } else { 12 };
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(browser_height), Constraint::Min(10)])
+            .split(outer[1])
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(39), Constraint::Percentage(61)])
+            .split(outer[1])
+    };
 
     render_browser(frame, app, main[0]);
     render_player(frame, app, main[1]);
@@ -114,6 +122,13 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         PlaybackStatus::Paused => "Paused",
         PlaybackStatus::Stopped => "Library Ready",
     };
+    let mood = if area.width < 72 {
+        "  XP deck  "
+    } else if area.width < 96 {
+        "  XP blue glass  "
+    } else {
+        "  XP blue glass • media deck • wave tank  "
+    };
 
     let text = Line::from(vec![
         Span::styled(
@@ -123,10 +138,7 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 .bg(XP_BLUE_DEEP)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            "  XP blue glass • media deck • wave tank  ",
-            Style::default().fg(XP_TEXT_LIGHT).bg(XP_BLUE),
-        ),
+        Span::styled(mood, Style::default().fg(XP_TEXT_LIGHT).bg(XP_BLUE)),
         Span::styled(
             format!(" {} ", title),
             Style::default()
@@ -162,14 +174,24 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         vertical: 1,
         horizontal: 1,
     });
-    if inner.width < 18 || inner.height < 10 {
+    if inner.width < 18 || inner.height < 6 {
         return;
     }
 
-    let sections = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(6), Constraint::Length(8)])
-        .split(inner);
+    let sections = if inner.height < 11 {
+        vec![inner]
+    } else {
+        let inspector_height = if inner.width < 42 || inner.height < 14 {
+            5
+        } else {
+            8
+        };
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(6), Constraint::Length(inspector_height)])
+            .split(inner)
+            .to_vec()
+    };
 
     let entries = app.browser().entries();
     let items = if entries.is_empty() {
@@ -203,7 +225,9 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     }
 
     frame.render_stateful_widget(list, sections[0], &mut state);
-    render_browser_inspector(frame, app, sections[1]);
+    if sections.len() > 1 {
+        render_browser_inspector(frame, app, sections[1]);
+    }
 }
 
 fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
@@ -222,61 +246,94 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
         FocusPane::Player => "player lane active · Tab to return to library",
     };
 
-    let lines = vec![
-        Line::from(vec![
-            browser_kind_chip(selected),
-            Span::raw(" "),
-            browser_state_chip(selected),
-            Span::raw(" "),
-            chip(format!("{directory_count} DIR"), XP_TEXT_DARK, XP_PANEL),
-            Span::raw(" "),
-            chip(
-                format!("{playlist_count} TRACK"),
-                XP_TEXT_DARK,
-                XP_HIGHLIGHT,
-            ),
-        ]),
-        Line::from(vec![
-            browser_label("Selection"),
-            Span::styled(
-                fit_text(&selection_name, area.width.saturating_sub(15) as usize),
-                Style::default()
-                    .fg(XP_TEXT_DARK)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(vec![
-            browser_label("Path"),
-            Span::styled(
-                fit_text(&selection_path, area.width.saturating_sub(10) as usize),
-                Style::default().fg(XP_BLUE),
-            ),
-        ]),
-        meter_line(
-            "depth",
-            browser_depth_ratio(entries, selected),
-            area.width.saturating_sub(18) as usize,
-            XP_BLUE_MID,
-            XP_PANEL_DARK,
-        ),
-        Line::from(vec![
-            browser_label("Action"),
-            Span::styled(
-                fit_text(
-                    browser_action_hint(selected),
-                    area.width.saturating_sub(12) as usize,
+    let compact = area.width < 42 || area.height < 8;
+    let lines = if compact {
+        vec![
+            Line::from(vec![
+                browser_kind_chip(selected),
+                Span::raw(" "),
+                browser_state_chip(selected),
+                Span::raw(" "),
+                chip(
+                    format!("{playlist_count} TRACK"),
+                    XP_TEXT_DARK,
+                    XP_HIGHLIGHT,
                 ),
-                Style::default().fg(XP_TEXT_DARK),
+            ]),
+            Line::from(vec![
+                browser_label("Pick"),
+                Span::styled(
+                    fit_text(&selection_name, area.width.saturating_sub(9) as usize),
+                    Style::default()
+                        .fg(XP_TEXT_DARK)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                browser_label("Path"),
+                Span::styled(
+                    fit_text(&selection_path, area.width.saturating_sub(9) as usize),
+                    Style::default().fg(XP_BLUE),
+                ),
+            ]),
+        ]
+    } else {
+        vec![
+            Line::from(vec![
+                browser_kind_chip(selected),
+                Span::raw(" "),
+                browser_state_chip(selected),
+                Span::raw(" "),
+                chip(format!("{directory_count} DIR"), XP_TEXT_DARK, XP_PANEL),
+                Span::raw(" "),
+                chip(
+                    format!("{playlist_count} TRACK"),
+                    XP_TEXT_DARK,
+                    XP_HIGHLIGHT,
+                ),
+            ]),
+            Line::from(vec![
+                browser_label("Selection"),
+                Span::styled(
+                    fit_text(&selection_name, area.width.saturating_sub(15) as usize),
+                    Style::default()
+                        .fg(XP_TEXT_DARK)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                browser_label("Path"),
+                Span::styled(
+                    fit_text(&selection_path, area.width.saturating_sub(10) as usize),
+                    Style::default().fg(XP_BLUE),
+                ),
+            ]),
+            meter_line(
+                "depth",
+                browser_depth_ratio(entries, selected),
+                area.width.saturating_sub(18) as usize,
+                XP_BLUE_MID,
+                XP_PANEL_DARK,
             ),
-        ]),
-        Line::from(vec![
-            browser_label("Focus"),
-            Span::styled(
-                fit_text(focus_hint, area.width.saturating_sub(11) as usize),
-                Style::default().fg(XP_BLUE),
-            ),
-        ]),
-    ];
+            Line::from(vec![
+                browser_label("Action"),
+                Span::styled(
+                    fit_text(
+                        browser_action_hint(selected),
+                        area.width.saturating_sub(12) as usize,
+                    ),
+                    Style::default().fg(XP_TEXT_DARK),
+                ),
+            ]),
+            Line::from(vec![
+                browser_label("Focus"),
+                Span::styled(
+                    fit_text(focus_hint, area.width.saturating_sub(11) as usize),
+                    Style::default().fg(XP_BLUE),
+                ),
+            ]),
+        ]
+    };
 
     let widget = Paragraph::new(lines)
         .block(
@@ -291,15 +348,47 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
 }
 
 fn render_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
-    let right = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    if area.height < 15 {
+        let compact = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(7),
+                Constraint::Min(3),
+                Constraint::Length(3),
+            ])
+            .split(area);
+
+        render_now_playing(
+            frame,
+            app.player(),
+            app.focus() == FocusPane::Player,
+            compact[0],
+        );
+        render_visualizer(frame, app.player(), compact[1]);
+        render_progress(frame, app.player(), compact[2]);
+        return;
+    }
+
+    let constraints = if area.width < 72 {
+        [
+            Constraint::Length(8),
+            Constraint::Length(8),
+            Constraint::Length(3),
+            Constraint::Length(6),
+            Constraint::Min(4),
+        ]
+    } else {
+        [
             Constraint::Length(10),
             Constraint::Length(10),
             Constraint::Length(3),
             Constraint::Length(7),
             Constraint::Min(5),
-        ])
+        ]
+    };
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
         .split(area);
 
     render_now_playing(
@@ -334,16 +423,9 @@ fn render_now_playing(
         horizontal: 1,
     });
 
-    if inner.width < 24 || inner.height < 5 {
+    if inner.width < 24 || inner.height < 2 {
         return;
     }
-
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(16), Constraint::Min(24)])
-        .split(inner);
-
-    render_album_tile(frame, player, columns[0]);
 
     let track_name = player
         .current_track
@@ -354,6 +436,40 @@ fn render_now_playing(
     let queue_text = match (player.queue_index, player.queue.is_empty()) {
         (Some(index), false) => format!("{} / {}", index + 1, player.queue.len()),
         _ => String::from("0 / 0"),
+    };
+
+    if inner.height < 5 {
+        let compact_lines = vec![
+            Line::from(vec![Span::styled(
+                fit_text(&track_name, inner.width.saturating_sub(2) as usize),
+                Style::default()
+                    .fg(XP_TEXT_DARK)
+                    .add_modifier(Modifier::BOLD),
+            )]),
+            Line::from(vec![
+                compact_playback_chip(player),
+                Span::raw(" "),
+                chip(format!("Q {queue_text}"), XP_TEXT_DARK, XP_PANEL),
+            ]),
+        ];
+
+        let widget = Paragraph::new(compact_lines)
+            .style(Style::default().bg(XP_SILVER))
+            .wrap(Wrap { trim: false });
+        frame.render_widget(widget, inner);
+        return;
+    }
+
+    let compact = inner.width < 52;
+    let detail_area = if compact {
+        inner
+    } else {
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(16), Constraint::Min(24)])
+            .split(inner);
+        render_album_tile(frame, player, columns[0]);
+        columns[1]
     };
 
     let status_chip = match player.status {
@@ -371,7 +487,7 @@ fn render_now_playing(
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                fit_text(&track_name, columns[1].width.saturating_sub(10) as usize),
+                fit_text(&track_name, detail_area.width.saturating_sub(10) as usize),
                 Style::default()
                     .fg(XP_TEXT_DARK)
                     .add_modifier(Modifier::BOLD),
@@ -387,18 +503,18 @@ fn render_now_playing(
         meter_line(
             "volume",
             player.volume as f64,
-            columns[1].width.saturating_sub(18) as usize,
+            detail_area.width.saturating_sub(18) as usize,
             XP_MINT,
             XP_PANEL_DARK,
         ),
         transport_line(player),
-        info_message_line(player, columns[1].width as usize),
+        info_message_line(player, detail_area.width as usize),
     ];
 
     let widget = Paragraph::new(detail_lines)
         .style(Style::default().bg(XP_SILVER))
         .wrap(Wrap { trim: false });
-    frame.render_widget(widget, columns[1]);
+    frame.render_widget(widget, detail_area);
 }
 
 fn render_album_tile(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
@@ -428,7 +544,13 @@ fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
         horizontal: 1,
     });
 
-    if inner.width < 12 || inner.height < 6 {
+    if inner.width < 12 || inner.height < 2 {
+        return;
+    }
+    if inner.height < 6 {
+        let compact = Paragraph::new(make_wave_line(player, inner.width as usize))
+            .style(Style::default().bg(XP_BLUE_DEEP));
+        frame.render_widget(compact, inner);
         return;
     }
 
@@ -552,6 +674,20 @@ fn render_status_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         horizontal: 1,
     });
     if inner.width < 24 {
+        return;
+    }
+
+    if inner.width < 72 {
+        let compact = Paragraph::new(Line::from(vec![
+            compact_status_chip(app),
+            Span::raw(" "),
+            Span::styled(
+                fit_text(app.status_line(), inner.width.saturating_sub(12) as usize),
+                Style::default().fg(XP_TEXT_DARK),
+            ),
+        ]))
+        .style(Style::default().bg(XP_SILVER));
+        frame.render_widget(compact, inner);
         return;
     }
 
@@ -718,6 +854,33 @@ fn display_relative_path(root: &Path, path: &Path) -> String {
             }
         })
         .unwrap_or_else(|| path.display().to_string())
+}
+
+fn compact_playback_chip(player: &PlayerState) -> Span<'static> {
+    match player.status {
+        PlaybackStatus::Playing => chip("PLAY", XP_TEXT_DARK, XP_MINT),
+        PlaybackStatus::Paused => chip("PAUSE", XP_TEXT_DARK, XP_HIGHLIGHT),
+        PlaybackStatus::Stopped => chip("STOP", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+    }
+}
+
+fn compact_status_chip(app: &App) -> Span<'static> {
+    let text = match (app.focus(), app.player().status.clone()) {
+        (FocusPane::Browser, PlaybackStatus::Playing) => " LIB • PLAY ",
+        (FocusPane::Browser, PlaybackStatus::Paused) => " LIB • PAUSE ",
+        (FocusPane::Browser, PlaybackStatus::Stopped) => " LIB • STOP ",
+        (FocusPane::Player, PlaybackStatus::Playing) => " PLAYER • PLAY ",
+        (FocusPane::Player, PlaybackStatus::Paused) => " PLAYER • PAUSE ",
+        (FocusPane::Player, PlaybackStatus::Stopped) => " PLAYER • STOP ",
+    };
+
+    Span::styled(
+        text,
+        Style::default()
+            .fg(XP_TEXT_LIGHT)
+            .bg(XP_BLUE_DEEP)
+            .add_modifier(Modifier::BOLD),
+    )
 }
 
 fn status_chip_line(app: &App) -> Line<'static> {
