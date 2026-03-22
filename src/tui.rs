@@ -542,7 +542,8 @@ fn render_now_playing(
         PlaybackStatus::Stopped => chip("READY", XP_TEXT_LIGHT, XP_BLUE_DEEP),
     };
 
-    let mut detail_lines = vec![Line::from(vec![
+    let mut detail_lines = vec![now_playing_header_line(player, detail_area.width as usize)];
+    detail_lines.push(Line::from(vec![
         hero_chip,
         Span::raw(" "),
         Span::styled(
@@ -556,9 +557,9 @@ fn render_now_playing(
                 .fg(XP_TEXT_DARK)
                 .add_modifier(Modifier::BOLD),
         ),
-    ])];
+    ]));
 
-    if detail_area.height >= 7 {
+    if detail_area.height >= 8 {
         detail_lines.push(deck_source_line(player, detail_area.width as usize));
     }
 
@@ -578,7 +579,7 @@ fn render_now_playing(
         XP_PANEL_DARK,
     ));
 
-    if detail_area.height >= 8 {
+    if detail_area.height >= 9 {
         detail_lines.push(meter_line(
             "drive",
             playback_energy(player),
@@ -656,13 +657,26 @@ fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
 }
 
 fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
-    let lush = area.height >= 9;
+    let lush = area.height >= 10;
+    let deluxe = area.height >= 8;
     let rows = if lush {
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1),
                 Constraint::Length(3),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+            ])
+            .split(area)
+    } else if deluxe {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Length(2),
                 Constraint::Length(1),
                 Constraint::Length(1),
                 Constraint::Length(1),
@@ -682,17 +696,9 @@ fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, 
             .split(area)
     };
 
-    let legend = Paragraph::new(Line::from(vec![
-        chip("SPECTRUM", XP_TEXT_DARK, XP_HIGHLIGHT),
-        Span::raw(" "),
-        chip("WAVE", XP_TEXT_LIGHT, XP_BLUE_MID),
-        Span::raw(" "),
-        chip("REFLECT", XP_TEXT_DARK, XP_PANEL),
-        Span::raw(" "),
-        chip("GLOW", XP_TEXT_DARK, XP_MINT),
-    ]))
-    .style(Style::default().bg(XP_BLUE_DEEP));
-    frame.render_widget(legend, rows[0]);
+    let header = Paragraph::new(visualizer_header_line(player, rows[0].width as usize))
+        .style(Style::default().bg(XP_BLUE_DEEP));
+    frame.render_widget(header, rows[0]);
 
     let spectrum = Paragraph::new(make_spectrum_lines(
         player,
@@ -706,28 +712,28 @@ fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, 
         .style(Style::default().bg(XP_BLUE_DEEP));
     frame.render_widget(wave, rows[2]);
 
-    let reflection_row = if lush {
+    let (glow_row, caption_row) = if deluxe {
         let reflection = Paragraph::new(make_reflection_line(player, rows[3].width as usize))
             .style(Style::default().bg(XP_BLUE_DEEP));
         frame.render_widget(reflection, rows[3]);
-        4
+        (4, 5)
     } else {
-        3
+        (3, 4)
     };
 
-    let glow = Paragraph::new(make_glow_line(player, rows[reflection_row].width as usize))
+    let glow = Paragraph::new(make_glow_line(player, rows[glow_row].width as usize))
         .style(Style::default().bg(XP_BLUE_DEEP));
-    frame.render_widget(glow, rows[reflection_row]);
+    frame.render_widget(glow, rows[glow_row]);
 
     let caption = Paragraph::new(Line::from(vec![Span::styled(
         fit_text(
             &visualizer_caption(player),
-            rows[reflection_row + 1].width as usize,
+            rows[caption_row].width as usize,
         ),
         Style::default().fg(XP_SILVER),
     )]))
     .style(Style::default().bg(XP_BLUE_DEEP));
-    frame.render_widget(caption, rows[reflection_row + 1]);
+    frame.render_widget(caption, rows[caption_row]);
 }
 
 fn render_signal_ladder(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
@@ -775,7 +781,17 @@ fn render_signal_ladder(frame: &mut ratatui::Frame<'_>, player: &PlayerState, ar
     let header = Paragraph::new(Line::from(vec![
         signal_chip,
         Span::raw(" "),
-        chip(compact_time_label(player), XP_TEXT_LIGHT, XP_BLUE_DEEP),
+        Span::styled(
+            fit_text(
+                &format!(
+                    "{} · {}",
+                    visualizer_preset(player),
+                    compact_time_label(player)
+                ),
+                rows[0].width.saturating_sub(9) as usize,
+            ),
+            Style::default().fg(XP_SKY).add_modifier(Modifier::BOLD),
+        ),
     ]))
     .style(Style::default().bg(XP_BLUE));
     frame.render_widget(header, rows[0]);
@@ -1372,6 +1388,90 @@ fn deck_source_line(player: &PlayerState, width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
+fn visualizer_collection() -> &'static str {
+    "BARS + WAVES"
+}
+
+fn visualizer_preset(player: &PlayerState) -> &'static str {
+    const PRESETS: [&str; 4] = ["Bars", "Ocean Mist", "Fire Storm", "Scope"];
+
+    let index = if player.current_track.is_some() {
+        track_seed(player) as usize % PRESETS.len()
+    } else {
+        1
+    };
+
+    PRESETS[index]
+}
+
+fn deck_rating(player: &PlayerState) -> usize {
+    if player.current_track.is_none() {
+        return 0;
+    }
+
+    let base = 3 + ((track_seed(player) as usize / 11) % 3);
+    match player.status {
+        PlaybackStatus::Playing => base.min(5),
+        PlaybackStatus::Paused => base.saturating_sub(1).max(2),
+        PlaybackStatus::Stopped => 2,
+    }
+}
+
+fn deck_rating_text(player: &PlayerState) -> String {
+    if player.current_track.is_none() {
+        return String::from("UNRATED");
+    }
+
+    let filled = deck_rating(player).min(5);
+    let stars = (0..5)
+        .map(|index| if index < filled { '★' } else { '☆' })
+        .collect::<String>();
+    format!("RATING {stars}")
+}
+
+fn now_playing_header_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let mut spans = vec![
+        chip("NOW PLAYING", XP_TEXT_LIGHT, XP_BLUE_MID),
+        Span::raw(" "),
+        chip(visualizer_collection(), XP_TEXT_DARK, XP_PANEL),
+    ];
+
+    if width >= 40 {
+        spans.push(Span::raw(" "));
+        spans.push(chip(visualizer_preset(player), XP_TEXT_DARK, XP_HIGHLIGHT));
+    }
+
+    if width >= 62 {
+        spans.push(Span::raw(" "));
+        spans.push(chip(deck_rating_text(player), XP_TEXT_DARK, XP_MINT));
+    }
+
+    Line::from(spans)
+}
+
+fn visualizer_header_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let signal_chip = match player.status {
+        PlaybackStatus::Playing => chip("LIVE", XP_TEXT_DARK, XP_MINT),
+        PlaybackStatus::Paused => chip("HOLD", XP_TEXT_DARK, XP_HIGHLIGHT),
+        PlaybackStatus::Stopped => chip("IDLE", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+    };
+
+    let mut spans = vec![signal_chip, Span::raw(" ")];
+    spans.push(chip(visualizer_collection(), XP_TEXT_DARK, XP_PANEL));
+
+    if width >= 34 {
+        spans.push(Span::raw(" "));
+        spans.push(chip(visualizer_preset(player), XP_TEXT_DARK, XP_HIGHLIGHT));
+    }
+
+    if width >= 54 {
+        spans.push(Span::raw(" "));
+        spans.push(chip("REFLECT + GLOW", XP_TEXT_DARK, XP_GLASS));
+    }
+
+    Line::from(spans)
+}
+
 fn compact_status_chip(app: &App) -> Span<'static> {
     let text = match (app.focus(), app.player().status.clone()) {
         (FocusPane::Browser, PlaybackStatus::Playing) => " LIB • PLAY ",
@@ -1729,23 +1829,25 @@ fn format_duration(duration: Duration) -> String {
 
 fn playback_mood(player: &PlayerState) -> &'static str {
     match player.status {
-        PlaybackStatus::Playing => "blue-glass lift",
-        PlaybackStatus::Paused => "held chrome shimmer",
-        PlaybackStatus::Stopped => "sleeping in the dock",
+        PlaybackStatus::Playing => "blue-glass screen in motion",
+        PlaybackStatus::Paused => "held on the last shimmer frame",
+        PlaybackStatus::Stopped => "sleeping in now playing mode",
     }
 }
 
 fn visualizer_caption(player: &PlayerState) -> String {
+    let preset = visualizer_preset(player);
     match player.status {
-        PlaybackStatus::Playing => String::from(
-            "Time-driven crest, reflection, and glow are keyed to track, volume, and playback position.",
+        PlaybackStatus::Playing => format!(
+            "{preset} throws a blocky crest, mirrored wash, and blue-glass glow across the deck."
         ),
-        PlaybackStatus::Paused => String::from(
-            "The wave tank holds its crest and reflection at the current playback posture.",
-        ),
-        PlaybackStatus::Stopped => {
-            String::from("Idle deck shimmer — select a track to wake the crest and reflection.")
+        PlaybackStatus::Paused => {
+            format!("{preset} freezes the crest and mirrored wash at the held playback frame.")
         }
+        PlaybackStatus::Stopped => format!(
+            "{preset} is armed in {} — queue a track to light the glass.",
+            visualizer_collection()
+        ),
     }
 }
 
@@ -1882,8 +1984,12 @@ fn visualizer_meter_lines(player: &PlayerState, width: usize, rows: usize) -> Ve
     };
 
     let meters = [
-        ("LVL", (player.volume as f64 / 2.0).clamp(0.0, 1.0), XP_MINT),
-        ("DRV", energy, XP_HIGHLIGHT),
+        (
+            "BARS",
+            (0.18 + player.volume as f64 * 0.36 + pulse * 0.28).clamp(0.0, 1.0),
+            XP_MINT,
+        ),
+        ("WAVE", energy, XP_HIGHLIGHT),
         (
             "AIR",
             (0.24 + progress * 0.28 + pulse * 0.36).clamp(0.0, 1.0),
@@ -2139,10 +2245,17 @@ fn make_spectrum_lines(player: &PlayerState, width: usize, rows: usize) -> Vec<L
             let wave_b = (x * 25.0 - phase * 0.7 + seed * 0.4).cos() * 0.55;
             let wave_c = ((index as f64 * 0.33) + phase * 1.3 + seed).sin() * 0.2;
             let pulse = ((phase * 0.75 + x * 4.0).sin() * 0.5 + 0.5) * 0.18;
+            let bass_bias = (1.0 - x.powf(0.7)) * 0.12;
+            let block_bias = if index % 2 == 0 { 0.04 } else { 0.0 };
             let normalized = (((wave_a + wave_b + wave_c) * 0.5) + 0.5).clamp(0.0, 1.0);
-            let boosted =
-                (normalized * 0.7 + energy * 0.2 + pulse + progress * 0.1).clamp(0.0, 1.0);
-            ((boosted * rows as f64).ceil() as usize).min(rows)
+            let boosted = (normalized * 0.62
+                + energy * 0.18
+                + pulse
+                + progress * 0.08
+                + bass_bias
+                + block_bias)
+                .clamp(0.0, 1.0);
+            ((boosted * rows as f64).round() as usize).min(rows)
         })
         .collect::<Vec<_>>();
 
@@ -2489,11 +2602,63 @@ mod tests {
     }
 
     #[test]
+    fn now_playing_header_line_surfaces_collection_preset_and_rating() {
+        let line = now_playing_header_line(&sample_player(), 80);
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| span.content.contains("NOW PLAYING"))
+        );
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| span.content.contains(visualizer_collection()))
+        );
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| span.content.contains(visualizer_preset(&sample_player())))
+        );
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| span.content.contains("RATING"))
+        );
+    }
+
+    #[test]
+    fn visualizer_header_line_mentions_current_preset() {
+        let line = visualizer_header_line(&sample_player(), 60);
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| span.content.contains(visualizer_collection()))
+        );
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| span.content.contains(visualizer_preset(&sample_player())))
+        );
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| span.content.contains("REFLECT + GLOW"))
+        );
+    }
+
+    #[test]
+    fn visualizer_caption_references_selected_preset() {
+        let caption = visualizer_caption(&sample_player());
+        assert!(caption.contains(visualizer_preset(&sample_player())));
+        assert!(caption.contains("blue-glass glow"));
+    }
+
+    #[test]
     fn visualizer_meter_lines_match_requested_height() {
         let lines = visualizer_meter_lines(&sample_player(), 14, 3);
         assert_eq!(lines.len(), 3);
-        assert!(lines[0].spans[0].content.contains("LVL"));
-        assert!(lines[1].spans[0].content.contains("DRV"));
+        assert!(lines[0].spans[0].content.contains("BARS"));
+        assert!(lines[1].spans[0].content.contains("WAVE"));
         assert!(lines[2].spans[0].content.contains("AIR"));
     }
 
