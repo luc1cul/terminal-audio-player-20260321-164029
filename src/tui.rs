@@ -716,6 +716,11 @@ fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
     if inner.width < 12 || inner.height < 1 {
         return;
     }
+    if inner.width >= 56 && (5..=6).contains(&inner.height) {
+        render_visualizer_bridge(frame, player, inner);
+        return;
+    }
+
     if inner.height < 6 {
         if inner.width >= 36 && inner.height >= 2 {
             let compact = Paragraph::new(compact_visualizer_lines(
@@ -747,6 +752,100 @@ fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
     }
 
     render_visualizer_deck(frame, player, inner);
+}
+
+fn render_visualizer_bridge(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
+    let rail_width = if area.width >= 68 { 20 } else { 18 };
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(36),
+            Constraint::Length(1),
+            Constraint::Length(rail_width),
+        ])
+        .split(area);
+
+    let deck = Paragraph::new(compact_visualizer_lines(
+        player,
+        columns[0].width as usize,
+        columns[0].height as usize,
+    ))
+    .style(Style::default().bg(XP_BLUE_DEEP))
+    .wrap(Wrap { trim: false });
+    frame.render_widget(deck, columns[0]);
+
+    let divider = Paragraph::new(signal_bridge_divider_lines(columns[1].height as usize))
+        .style(Style::default().bg(XP_BLUE_DEEP));
+    frame.render_widget(divider, columns[1]);
+
+    let rail = Paragraph::new(signal_rail_lines(
+        player,
+        columns[2].width as usize,
+        columns[2].height as usize,
+    ))
+    .style(Style::default().bg(XP_BLUE));
+    frame.render_widget(rail, columns[2]);
+}
+
+fn signal_bridge_divider_lines(height: usize) -> Vec<Line<'static>> {
+    (0..height.max(1))
+        .map(|index| {
+            let accent = if index % 2 == 0 {
+                XP_PANEL_DARK
+            } else {
+                XP_SKY
+            };
+            Line::from(vec![Span::styled(
+                "▏",
+                Style::default().fg(accent).bg(XP_BLUE_DEEP),
+            )])
+        })
+        .collect()
+}
+
+fn signal_rail_lines(player: &PlayerState, width: usize, height: usize) -> Vec<Line<'static>> {
+    let width = width.max(14);
+    let height = height.max(4);
+    let mut lines = vec![signal_rail_header_line(player, width)];
+    let meter_rows = height.saturating_sub(2).clamp(2, 4);
+    lines.extend(visualizer_meter_lines(player, width, meter_rows));
+    lines.truncate(height.saturating_sub(1));
+    lines.push(signal_rail_footer_line(player, width));
+    lines
+}
+
+fn signal_rail_header_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let mut spans = vec![chip("LEVEL RAIL", XP_TEXT_DARK, XP_PANEL)];
+
+    if width >= 20 {
+        spans.push(Span::raw(" "));
+        spans.push(visualizer_state_chip(player));
+    }
+
+    Line::from(spans)
+}
+
+fn signal_rail_footer_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let footer = match player.status {
+        PlaybackStatus::Stopped => String::from("queue to wake rail"),
+        PlaybackStatus::Paused => format!(
+            "{} · held · {}",
+            visualizer_preset(player),
+            compact_time_label(player)
+        ),
+        PlaybackStatus::Playing => {
+            format!(
+                "{} · crest · {}",
+                visualizer_preset(player),
+                compact_time_label(player)
+            )
+        }
+    };
+
+    Line::from(vec![Span::styled(
+        fit_text(&footer, width),
+        Style::default().fg(XP_SILVER),
+    )])
 }
 
 fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
@@ -1631,9 +1730,13 @@ fn compact_visualizer_lines(
             compact_visualizer_caption_line(player, width),
         ],
         _ => {
+            let spectrum_rows = height.saturating_sub(4).max(2);
             let mut lines = vec![compact_visualizer_header_line(player, width)];
-            lines.extend(make_spectrum_lines(player, width, 2));
+            lines.extend(make_spectrum_lines(player, width, spectrum_rows));
             lines.push(make_wave_line(player, width));
+            if height >= 6 {
+                lines.push(make_glow_line(player, width));
+            }
             lines.push(compact_visualizer_caption_line(player, width));
             lines
         }
@@ -2630,6 +2733,22 @@ mod tests {
             .join("\n")
     }
 
+    fn render_player_focus_snapshot(width: u16, height: u16) -> String {
+        let temp = tempdir().unwrap();
+        let (command_tx, _command_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+        let mut app = App::new(temp.path().to_path_buf(), command_tx, event_rx).unwrap();
+
+        event_tx
+            .send(EngineEvent::StateUpdated(sample_player()))
+            .unwrap();
+        app.drain_engine_events();
+        app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+
+        render_snapshot(width, height, &app)
+    }
+
     #[test]
     fn fit_text_adds_ellipsis_when_needed() {
         assert_eq!(fit_text("abcdef", 4), "abc…");
@@ -2885,6 +3004,26 @@ mod tests {
     }
 
     #[test]
+    fn signal_rail_lines_fill_requested_height() {
+        let lines = signal_rail_lines(&sample_player(), 20, 6);
+        assert_eq!(lines.len(), 6);
+        assert!(
+            lines[0]
+                .spans
+                .iter()
+                .any(|span| span.content.contains("LEVEL RAIL"))
+        );
+        assert!(
+            lines
+                .last()
+                .unwrap()
+                .spans
+                .iter()
+                .any(|span| span.content.contains(visualizer_preset(&sample_player())))
+        );
+    }
+
+    #[test]
     fn wide_short_layout_signal_deck_shows_compact_wash_caption() {
         let temp = tempdir().unwrap();
         let (command_tx, _command_rx) = mpsc::channel();
@@ -2901,6 +3040,20 @@ mod tests {
         let screen = render_snapshot(120, 20, &app);
         assert!(screen.contains("WASH"));
         assert!(screen.contains("crest / mirror / glow"));
+    }
+
+    #[test]
+    fn wide_midheight_signal_deck_uses_level_rail_bridge() {
+        let screen = render_player_focus_snapshot(120, 24);
+        assert!(screen.contains("LEVEL RAIL"));
+        assert!(!screen.contains("Signal Ladder"));
+    }
+
+    #[test]
+    fn wide_taller_signal_deck_graduates_to_signal_ladder() {
+        let screen = render_player_focus_snapshot(120, 25);
+        assert!(screen.contains("Signal Ladder"));
+        assert!(!screen.contains("LEVEL RAIL"));
     }
 
     #[test]
