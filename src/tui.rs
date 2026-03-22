@@ -717,9 +717,20 @@ fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
         return;
     }
     if inner.height < 6 {
-        let compact = Paragraph::new(make_wave_line(player, inner.width as usize))
-            .style(Style::default().bg(XP_BLUE_DEEP));
-        frame.render_widget(compact, inner);
+        if inner.width >= 36 && inner.height >= 2 {
+            let compact = Paragraph::new(compact_visualizer_lines(
+                player,
+                inner.width as usize,
+                inner.height as usize,
+            ))
+            .style(Style::default().bg(XP_BLUE_DEEP))
+            .wrap(Wrap { trim: false });
+            frame.render_widget(compact, inner);
+        } else {
+            let compact = Paragraph::new(make_wave_line(player, inner.width as usize))
+                .style(Style::default().bg(XP_BLUE_DEEP));
+            frame.render_widget(compact, inner);
+        }
         return;
     }
 
@@ -855,13 +866,8 @@ fn render_signal_ladder(frame: &mut ratatui::Frame<'_>, player: &PlayerState, ar
         ])
         .split(inner);
 
-    let signal_chip = match player.status {
-        PlaybackStatus::Playing => chip("LIVE", XP_TEXT_DARK, XP_MINT),
-        PlaybackStatus::Paused => chip("HOLD", XP_TEXT_DARK, XP_HIGHLIGHT),
-        PlaybackStatus::Stopped => chip("IDLE", XP_TEXT_LIGHT, XP_BLUE_DEEP),
-    };
     let header = Paragraph::new(Line::from(vec![
-        signal_chip,
+        visualizer_state_chip(player),
         Span::raw(" "),
         Span::styled(
             fit_text(
@@ -1531,14 +1537,111 @@ fn now_playing_header_line(player: &PlayerState, width: usize) -> Line<'static> 
     Line::from(spans)
 }
 
-fn visualizer_header_line(player: &PlayerState, width: usize) -> Line<'static> {
-    let signal_chip = match player.status {
+fn visualizer_state_chip(player: &PlayerState) -> Span<'static> {
+    match player.status {
         PlaybackStatus::Playing => chip("LIVE", XP_TEXT_DARK, XP_MINT),
         PlaybackStatus::Paused => chip("HOLD", XP_TEXT_DARK, XP_HIGHLIGHT),
         PlaybackStatus::Stopped => chip("IDLE", XP_TEXT_LIGHT, XP_BLUE_DEEP),
-    };
+    }
+}
 
-    let mut spans = vec![signal_chip, Span::raw(" ")];
+fn compact_visualizer_header_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let mut spans = vec![visualizer_state_chip(player), Span::raw(" ")];
+    spans.push(chip(visualizer_preset(player), XP_TEXT_DARK, XP_HIGHLIGHT));
+
+    if width >= 46 {
+        spans.push(Span::raw(" "));
+        spans.push(chip(visualizer_collection(), XP_TEXT_DARK, XP_PANEL));
+    }
+
+    if width >= 62 {
+        spans.push(Span::raw(" "));
+        spans.push(chip(compact_time_label(player), XP_TEXT_LIGHT, XP_BLUE_MID));
+    }
+
+    Line::from(spans)
+}
+
+fn compact_visualizer_caption_text(player: &PlayerState) -> String {
+    match player.status {
+        PlaybackStatus::Playing => {
+            format!("crest / mirror / glow · {}", compact_time_label(player))
+        }
+        PlaybackStatus::Paused => {
+            format!("held crest / frozen wash · {}", compact_time_label(player))
+        }
+        PlaybackStatus::Stopped => String::from("idle glass / queue a track"),
+    }
+}
+
+fn compact_visualizer_caption_line(player: &PlayerState, width: usize) -> Line<'static> {
+    Line::from(vec![
+        chip("WASH", XP_TEXT_DARK, XP_PANEL),
+        Span::raw(" "),
+        Span::styled(
+            fit_text(
+                &compact_visualizer_caption_text(player),
+                width.saturating_sub(9).max(8),
+            ),
+            Style::default().fg(XP_SILVER),
+        ),
+    ])
+}
+
+fn compact_visualizer_wave_caption_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let gap = if width >= 56 { 3 } else { 2 };
+    let caption_width = if width >= 68 {
+        34
+    } else if width >= 54 {
+        28
+    } else {
+        20
+    };
+    let wave_width = width.saturating_sub(caption_width + gap).max(12);
+    let caption_width = width.saturating_sub(wave_width + gap).max(10);
+
+    let mut spans = make_wave_line(player, wave_width).spans;
+    spans.push(Span::raw(" ".repeat(gap)));
+    spans.extend(compact_visualizer_caption_line(player, caption_width).spans);
+    Line::from(spans)
+}
+
+fn compact_visualizer_lines(
+    player: &PlayerState,
+    width: usize,
+    height: usize,
+) -> Vec<Line<'static>> {
+    let width = width.max(36);
+
+    match height.max(1) {
+        1 => vec![make_wave_line(player, width)],
+        2 => vec![
+            compact_visualizer_header_line(player, width),
+            compact_visualizer_wave_caption_line(player, width),
+        ],
+        3 => vec![
+            compact_visualizer_header_line(player, width),
+            make_wave_line(player, width),
+            compact_visualizer_caption_line(player, width),
+        ],
+        4 => vec![
+            compact_visualizer_header_line(player, width),
+            make_signature_line(player, width),
+            make_wave_line(player, width),
+            compact_visualizer_caption_line(player, width),
+        ],
+        _ => {
+            let mut lines = vec![compact_visualizer_header_line(player, width)];
+            lines.extend(make_spectrum_lines(player, width, 2));
+            lines.push(make_wave_line(player, width));
+            lines.push(compact_visualizer_caption_line(player, width));
+            lines
+        }
+    }
+}
+
+fn visualizer_header_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let mut spans = vec![visualizer_state_chip(player), Span::raw(" ")];
     spans.push(chip(visualizer_collection(), XP_TEXT_DARK, XP_PANEL));
 
     if width >= 34 {
@@ -2749,6 +2852,55 @@ mod tests {
         assert!(screen.contains("Playback Deck"));
         assert!(screen.contains("NOW PLAYING"));
         assert!(screen.contains("Signal Deck"));
+    }
+
+    #[test]
+    fn compact_visualizer_lines_add_header_and_wash_caption() {
+        let lines = compact_visualizer_lines(&sample_player(), 64, 3);
+        assert_eq!(lines.len(), 3);
+        assert!(
+            lines[0]
+                .spans
+                .iter()
+                .any(|span| span.content.contains("LIVE"))
+        );
+        assert!(
+            lines[0]
+                .spans
+                .iter()
+                .any(|span| span.content.contains(visualizer_preset(&sample_player())))
+        );
+        assert!(
+            lines[2]
+                .spans
+                .iter()
+                .any(|span| span.content.contains("WASH"))
+        );
+        assert!(
+            lines[2]
+                .spans
+                .iter()
+                .any(|span| span.content.contains("crest / mirror / glow"))
+        );
+    }
+
+    #[test]
+    fn wide_short_layout_signal_deck_shows_compact_wash_caption() {
+        let temp = tempdir().unwrap();
+        let (command_tx, _command_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+        let mut app = App::new(temp.path().to_path_buf(), command_tx, event_rx).unwrap();
+
+        event_tx
+            .send(EngineEvent::StateUpdated(sample_player()))
+            .unwrap();
+        app.drain_engine_events();
+        app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+
+        let screen = render_snapshot(120, 20, &app);
+        assert!(screen.contains("WASH"));
+        assert!(screen.contains("crest / mirror / glow"));
     }
 
     #[test]
