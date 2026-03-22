@@ -460,23 +460,13 @@ fn render_now_playing(
     };
 
     if inner.height < 5 {
-        let compact_lines = vec![
-            Line::from(vec![Span::styled(
-                fit_text(&track_name, inner.width.saturating_sub(2) as usize),
-                Style::default()
-                    .fg(XP_TEXT_DARK)
-                    .add_modifier(Modifier::BOLD),
-            )]),
-            Line::from(vec![
-                compact_playback_chip(player),
-                Span::raw(" "),
-                chip(format!("Q {queue_text}"), XP_TEXT_DARK, XP_PANEL),
-            ]),
-        ];
-
-        let widget = Paragraph::new(compact_lines)
-            .style(Style::default().bg(XP_SILVER))
-            .wrap(Wrap { trim: false });
+        let widget = Paragraph::new(compact_now_playing_lines(
+            player,
+            inner.width as usize,
+            inner.height as usize,
+        ))
+        .style(Style::default().bg(XP_SILVER))
+        .wrap(Wrap { trim: false });
         frame.render_widget(widget, inner);
         return;
     }
@@ -914,6 +904,83 @@ fn compact_playback_chip(player: &PlayerState) -> Span<'static> {
         PlaybackStatus::Playing => chip("PLAY", XP_TEXT_DARK, XP_MINT),
         PlaybackStatus::Paused => chip("PAUSE", XP_TEXT_DARK, XP_HIGHLIGHT),
         PlaybackStatus::Stopped => chip("STOP", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+    }
+}
+
+fn compact_now_playing_lines(
+    player: &PlayerState,
+    width: usize,
+    height: usize,
+) -> Vec<Line<'static>> {
+    let width = width.max(16);
+    let track_name = player
+        .current_track
+        .as_ref()
+        .map(|track| track.title.clone())
+        .unwrap_or_else(|| String::from("Drop into the library and press Enter"));
+    let queue_text = match (player.queue_index, player.queue.is_empty()) {
+        (Some(index), false) => format!("Q {} / {}", index + 1, player.queue.len()),
+        _ => String::from("Q 0 / 0"),
+    };
+
+    let mut lines = vec![Line::from(vec![Span::styled(
+        fit_text(&track_name, width.saturating_sub(1)),
+        Style::default()
+            .fg(XP_TEXT_DARK)
+            .add_modifier(Modifier::BOLD),
+    )])];
+
+    if height >= 3 {
+        lines.push(Line::from(vec![Span::styled(
+            fit_text(&compact_track_context(player), width.saturating_sub(1)),
+            Style::default().fg(XP_BLUE),
+        )]));
+    }
+
+    let time_chip = chip(compact_time_label(player), XP_TEXT_LIGHT, XP_BLUE_MID);
+    let queue_chip = chip(queue_text, XP_TEXT_DARK, XP_PANEL);
+    let bottom = if width >= 42 {
+        vec![
+            compact_playback_chip(player),
+            Span::raw(" "),
+            time_chip,
+            Span::raw(" "),
+            queue_chip,
+        ]
+    } else if width >= 30 {
+        vec![compact_playback_chip(player), Span::raw(" "), time_chip]
+    } else {
+        vec![compact_playback_chip(player)]
+    };
+    lines.push(Line::from(bottom));
+
+    lines
+}
+
+fn compact_track_context(player: &PlayerState) -> String {
+    match (&player.last_error, player.current_track.as_ref()) {
+        (Some(error), _) => format!("error · {error}"),
+        (_, Some(track)) => track
+            .path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .map(|name| format!("folder · {}", name.to_string_lossy()))
+            .unwrap_or_else(|| String::from("library selection loaded")),
+        _ => String::from("select a track to light the deck"),
+    }
+}
+
+fn compact_time_label(player: &PlayerState) -> String {
+    match (player.current_track.as_ref(), player.duration) {
+        (Some(_), Some(duration)) if !duration.is_zero() => {
+            format!(
+                "{} / {}",
+                format_duration(player.position),
+                format_duration(duration)
+            )
+        }
+        (Some(_), _) if !player.position.is_zero() => format_duration(player.position),
+        _ => String::from("--:--"),
     }
 }
 
@@ -1566,5 +1633,49 @@ mod tests {
         let root = Path::new("/Users/lucw/.openclaw/workspace/terminal-audio-player");
         assert_eq!(browser_root_label(root, 16), "terminal-audio-…");
         assert_eq!(browser_root_label(root, 28), "workspace/terminal-audio-pl…");
+    }
+
+    #[test]
+    fn compact_track_context_prefers_parent_folder() {
+        let mut player = sample_player();
+        player.current_track = Some(Track {
+            path: PathBuf::from("albums/night-drive/ocean-avenue.wav"),
+            title: String::from("Ocean Avenue After Midnight"),
+        });
+
+        assert_eq!(compact_track_context(&player), "folder · night-drive");
+    }
+
+    #[test]
+    fn compact_now_playing_lines_expand_with_available_height() {
+        let mut player = sample_player();
+        player.current_track = Some(Track {
+            path: PathBuf::from("albums/night-drive/ocean-avenue.wav"),
+            title: String::from("Ocean Avenue After Midnight"),
+        });
+
+        let short = compact_now_playing_lines(&player, 40, 2);
+        let taller = compact_now_playing_lines(&player, 40, 4);
+
+        assert_eq!(short.len(), 2);
+        assert_eq!(taller.len(), 3);
+        assert!(
+            short[1]
+                .spans
+                .iter()
+                .any(|span| span.content.contains("01:13 / 03:32"))
+        );
+        assert!(
+            taller[1]
+                .spans
+                .iter()
+                .any(|span| span.content.contains("folder · night-drive"))
+        );
+    }
+
+    #[test]
+    fn compact_time_label_shows_placeholder_when_nothing_is_loaded() {
+        let player = PlayerState::default();
+        assert_eq!(compact_time_label(&player), "--:--");
     }
 }
