@@ -158,8 +158,15 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
-    let root_label =
-        browser_root_label(app.browser().root(), area.width.saturating_sub(20) as usize);
+    let compact_browser = area.width < 84 || area.height < 12;
+    let root_label = browser_root_label(
+        app.browser().root(),
+        if compact_browser {
+            area.width.saturating_sub(26) as usize
+        } else {
+            area.width.saturating_sub(20) as usize
+        },
+    );
     let title = match app.focus() {
         FocusPane::Browser => format!(" Media Library ◆ {root_label}"),
         FocusPane::Player => format!(" Media Library ◇ {root_label}"),
@@ -172,11 +179,11 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         vertical: 1,
         horizontal: 1,
     });
-    if inner.width < 18 || inner.height < 6 {
+    if inner.width < 18 || inner.height < 4 {
         return;
     }
 
-    let sections = if inner.height < 11 {
+    let sections = if compact_browser || inner.height < 11 {
         vec![inner]
     } else {
         let inspector_height = if inner.width < 42 || inner.height < 14 {
@@ -201,21 +208,30 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         entries.iter().map(browser_item).collect::<Vec<_>>()
     };
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title(" Navigator ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(XP_SKY))
-                .style(Style::default().bg(XP_SILVER)),
-        )
-        .highlight_symbol("◆ ")
-        .highlight_style(
+    let list = if compact_browser {
+        List::new(items).highlight_symbol("◆ ").highlight_style(
             Style::default()
                 .fg(XP_TEXT_LIGHT)
                 .bg(XP_BLUE_MID)
                 .add_modifier(Modifier::BOLD),
-        );
+        )
+    } else {
+        List::new(items)
+            .block(
+                Block::default()
+                    .title(" Navigator ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(XP_SKY))
+                    .style(Style::default().bg(XP_SILVER)),
+            )
+            .highlight_symbol("◆ ")
+            .highlight_style(
+                Style::default()
+                    .fg(XP_TEXT_LIGHT)
+                    .bg(XP_BLUE_MID)
+                    .add_modifier(Modifier::BOLD),
+            )
+    };
 
     let mut state = ListState::default();
     if !entries.is_empty() {
@@ -675,7 +691,7 @@ fn render_status_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         return;
     }
 
-    if inner.width < 72 {
+    if inner.width < 88 {
         let compact = Paragraph::new(Line::from(vec![
             compact_status_chip(app),
             Span::raw(" "),
@@ -847,7 +863,7 @@ fn browser_root_label(root: &Path, max_chars: usize) -> String {
         );
     }
 
-    if max_chars <= 34 {
+    if max_chars <= 80 {
         return fit_text(&tail_path(root, 2), max_chars);
     }
 
