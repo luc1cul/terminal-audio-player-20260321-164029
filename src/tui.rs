@@ -489,27 +489,30 @@ fn render_now_playing(
         PlaybackStatus::Stopped => chip("STOPPED", XP_TEXT_LIGHT, XP_BLUE_DEEP),
     };
 
+    let hero_chip = match player.status {
+        PlaybackStatus::Playing => chip("ON AIR", XP_TEXT_DARK, XP_HIGHLIGHT),
+        PlaybackStatus::Paused => chip("HELD", XP_TEXT_DARK, XP_PANEL),
+        PlaybackStatus::Stopped => chip("READY", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+    };
+
     let detail_lines = vec![
         Line::from(vec![
+            hero_chip,
+            Span::raw(" "),
             Span::styled(
-                " Track  ",
-                Style::default()
-                    .fg(XP_BLUE_DEEP)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                fit_text(&track_name, detail_area.width.saturating_sub(10) as usize),
+                fit_text(&track_name, detail_area.width.saturating_sub(13) as usize),
                 Style::default()
                     .fg(XP_TEXT_DARK)
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
+        now_playing_context_line(player, detail_area.width as usize),
         Line::from(vec![
             status_chip,
             Span::raw(" "),
             chip(format!("QUEUE {queue_text}"), XP_TEXT_DARK, XP_PANEL),
             Span::raw(" "),
-            chip(format_duration(player.position), XP_TEXT_LIGHT, XP_BLUE_MID),
+            chip(compact_time_label(player), XP_TEXT_LIGHT, XP_BLUE_MID),
         ]),
         meter_line(
             "volume",
@@ -565,6 +568,22 @@ fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
         return;
     }
 
+    if inner.width >= 40 && inner.height >= 7 {
+        let ladder_width = if inner.width >= 58 { 19 } else { 16 };
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(20), Constraint::Length(ladder_width)])
+            .split(inner);
+
+        render_visualizer_deck(frame, player, columns[0]);
+        render_signal_ladder(frame, player, columns[1]);
+        return;
+    }
+
+    render_visualizer_deck(frame, player, inner);
+}
+
+fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -574,7 +593,7 @@ fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
             Constraint::Length(1),
             Constraint::Min(1),
         ])
-        .split(inner);
+        .split(area);
 
     let legend = Paragraph::new(Line::from(vec![
         chip("SPECTRUM", XP_TEXT_DARK, XP_HIGHLIGHT),
@@ -608,6 +627,85 @@ fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
     )]))
     .style(Style::default().bg(XP_BLUE_DEEP));
     frame.render_widget(caption, rows[4]);
+}
+
+fn render_signal_ladder(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
+    let block = Block::default()
+        .title(" Signal Ladder ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(XP_SKY))
+        .style(Style::default().bg(XP_BLUE));
+    frame.render_widget(block, area);
+
+    let inner = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    if inner.width < 10 || inner.height < 2 {
+        return;
+    }
+
+    if inner.height < 5 {
+        let meters = Paragraph::new(visualizer_meter_lines(
+            player,
+            inner.width as usize,
+            inner.height as usize,
+        ))
+        .style(Style::default().bg(XP_BLUE));
+        frame.render_widget(meters, inner);
+        return;
+    }
+
+    let footer_height = if inner.height >= 7 { 2 } else { 1 };
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(2),
+            Constraint::Length(footer_height),
+        ])
+        .split(inner);
+
+    let signal_chip = match player.status {
+        PlaybackStatus::Playing => chip("LIVE", XP_TEXT_DARK, XP_MINT),
+        PlaybackStatus::Paused => chip("HOLD", XP_TEXT_DARK, XP_HIGHLIGHT),
+        PlaybackStatus::Stopped => chip("IDLE", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+    };
+    let header = Paragraph::new(Line::from(vec![
+        signal_chip,
+        Span::raw(" "),
+        chip(compact_time_label(player), XP_TEXT_LIGHT, XP_BLUE_DEEP),
+    ]))
+    .style(Style::default().bg(XP_BLUE));
+    frame.render_widget(header, rows[0]);
+
+    let meters = Paragraph::new(visualizer_meter_lines(
+        player,
+        rows[1].width as usize,
+        rows[1].height as usize,
+    ))
+    .style(Style::default().bg(XP_BLUE));
+    frame.render_widget(meters, rows[1]);
+
+    let footer_lines = if rows[2].height > 1 {
+        vec![
+            Line::from(vec![Span::styled(
+                fit_text(playback_mood(player), rows[2].width as usize),
+                Style::default().fg(XP_HIGHLIGHT),
+            )]),
+            Line::from(vec![Span::styled(
+                fit_text(&visualizer_caption(player), rows[2].width as usize),
+                Style::default().fg(XP_SILVER),
+            )]),
+        ]
+    } else {
+        vec![Line::from(vec![Span::styled(
+            fit_text(playback_mood(player), rows[2].width as usize),
+            Style::default().fg(XP_HIGHLIGHT),
+        )])]
+    };
+    let footer = Paragraph::new(footer_lines).style(Style::default().bg(XP_BLUE));
+    frame.render_widget(footer, rows[2]);
 }
 
 fn render_progress(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
@@ -1240,6 +1338,126 @@ fn album_tile_lines(player: &PlayerState) -> Vec<Line<'static>> {
     ]
 }
 
+fn now_playing_context_line(player: &PlayerState, width: usize) -> Line<'static> {
+    Line::from(vec![Span::styled(
+        fit_text(&now_playing_context_text(player), width.max(1)),
+        Style::default().fg(XP_BLUE),
+    )])
+}
+
+fn now_playing_context_text(player: &PlayerState) -> String {
+    match (&player.last_error, player.current_track.as_ref()) {
+        (Some(error), _) => format!("signal fault · {error}"),
+        (_, Some(track)) => {
+            let folder = track
+                .path
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .map(|name| name.to_string_lossy().into_owned());
+            let shelf = track
+                .path
+                .parent()
+                .and_then(|parent| parent.parent())
+                .and_then(|grandparent| grandparent.file_name())
+                .map(|name| name.to_string_lossy().into_owned());
+            let codec = track
+                .path
+                .extension()
+                .map(|ext| ext.to_string_lossy().to_uppercase());
+
+            let mut parts = Vec::new();
+            if let Some(shelf) = shelf
+                && !shelf.is_empty()
+            {
+                parts.push(format!("shelf · {shelf}"));
+            }
+            if let Some(folder) = folder
+                && !folder.is_empty()
+            {
+                parts.push(format!("folder · {folder}"));
+            }
+            if let Some(codec) = codec
+                && !codec.is_empty()
+            {
+                parts.push(format!("codec · {codec}"));
+            }
+
+            if parts.is_empty() {
+                String::from("library selection loaded")
+            } else {
+                parts.join("   ")
+            }
+        }
+        _ => String::from("select a track to wake the blue-glass deck"),
+    }
+}
+
+fn mini_meter_line(label: &str, ratio: f64, width: usize, active_color: Color) -> Line<'static> {
+    let ratio = ratio.clamp(0.0, 1.0);
+    let bar_width = width.max(8).saturating_sub(label.len() + 1).max(4);
+    let filled = (ratio * bar_width as f64).round() as usize;
+
+    let mut spans = vec![Span::styled(
+        format!("{label} "),
+        Style::default().fg(XP_SILVER).add_modifier(Modifier::BOLD),
+    )];
+
+    for index in 0..bar_width {
+        let (glyph, color) = if index < filled {
+            ('▮', active_color)
+        } else {
+            ('▯', XP_PANEL_DARK)
+        };
+        spans.push(Span::styled(glyph.to_string(), Style::default().fg(color)));
+    }
+
+    Line::from(spans)
+}
+
+fn visualizer_meter_lines(player: &PlayerState, width: usize, rows: usize) -> Vec<Line<'static>> {
+    let progress = progress_info(player).0;
+    let energy = playback_energy(player);
+    let queue_ratio = match (player.queue_index, player.queue.len()) {
+        (Some(index), len) if len > 0 => (index + 1) as f64 / len as f64,
+        _ => 0.0,
+    };
+    let pulse = match player.status {
+        PlaybackStatus::Stopped => 0.14,
+        PlaybackStatus::Paused => {
+            ((track_seed(player) as f64 * 0.0007).sin() * 0.25 + 0.45).clamp(0.0, 1.0)
+        }
+        PlaybackStatus::Playing => {
+            ((player.position.as_secs_f64() * 3.2 + track_seed(player) as f64 * 0.0007).sin() * 0.5
+                + 0.5)
+                .clamp(0.0, 1.0)
+        }
+    };
+    let position_ratio = if progress > 0.0 {
+        progress
+    } else if player.status == PlaybackStatus::Stopped {
+        0.0
+    } else {
+        pulse * 0.65
+    };
+
+    let meters = [
+        ("LVL", (player.volume as f64 / 2.0).clamp(0.0, 1.0), XP_MINT),
+        ("DRV", energy, XP_HIGHLIGHT),
+        (
+            "AIR",
+            (0.24 + progress * 0.28 + pulse * 0.36).clamp(0.0, 1.0),
+            XP_GLASS,
+        ),
+        ("POS", position_ratio.max(queue_ratio * 0.2), XP_SKY),
+    ];
+
+    meters
+        .into_iter()
+        .take(rows.max(1))
+        .map(|(label, ratio, color)| mini_meter_line(label, ratio, width, color))
+        .collect()
+}
+
 fn chip(text: impl Into<String>, fg: Color, bg: Color) -> Span<'static> {
     Span::styled(
         format!(" {} ", text.into()),
@@ -1644,6 +1862,29 @@ mod tests {
         });
 
         assert_eq!(compact_track_context(&player), "folder · night-drive");
+    }
+
+    #[test]
+    fn now_playing_context_text_uses_shelf_folder_and_codec() {
+        let mut player = sample_player();
+        player.current_track = Some(Track {
+            path: PathBuf::from("albums/night-drive/ocean-avenue.flac"),
+            title: String::from("Ocean Avenue After Midnight"),
+        });
+
+        assert_eq!(
+            now_playing_context_text(&player),
+            "shelf · albums   folder · night-drive   codec · FLAC"
+        );
+    }
+
+    #[test]
+    fn visualizer_meter_lines_match_requested_height() {
+        let lines = visualizer_meter_lines(&sample_player(), 14, 3);
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].spans[0].content.contains("LVL"));
+        assert!(lines[1].spans[0].content.contains("DRV"));
+        assert!(lines[2].spans[0].content.contains("AIR"));
     }
 
     #[test]
