@@ -542,40 +542,54 @@ fn render_now_playing(
         PlaybackStatus::Stopped => chip("READY", XP_TEXT_LIGHT, XP_BLUE_DEEP),
     };
 
-    let detail_lines = vec![
-        Line::from(vec![
-            hero_chip,
-            Span::raw(" "),
-            Span::styled(
-                animated_marquee(
-                    player,
-                    &track_name,
-                    detail_area.width.saturating_sub(13) as usize,
-                    4.0,
-                ),
-                Style::default()
-                    .fg(XP_TEXT_DARK)
-                    .add_modifier(Modifier::BOLD),
+    let mut detail_lines = vec![Line::from(vec![
+        hero_chip,
+        Span::raw(" "),
+        Span::styled(
+            animated_marquee(
+                player,
+                &track_name,
+                detail_area.width.saturating_sub(13).max(8) as usize,
+                4.0,
             ),
-        ]),
-        now_playing_context_line(player, detail_area.width as usize),
-        Line::from(vec![
-            status_chip,
-            Span::raw(" "),
-            chip(format!("QUEUE {queue_text}"), XP_TEXT_DARK, XP_PANEL),
-            Span::raw(" "),
-            chip(compact_time_label(player), XP_TEXT_LIGHT, XP_BLUE_MID),
-        ]),
-        meter_line(
-            "volume",
-            player.volume as f64,
-            detail_area.width.saturating_sub(18) as usize,
-            XP_MINT,
-            XP_PANEL_DARK,
+            Style::default()
+                .fg(XP_TEXT_DARK)
+                .add_modifier(Modifier::BOLD),
         ),
-        transport_line(player),
-        info_message_line(player, detail_area.width as usize),
-    ];
+    ])];
+
+    if detail_area.height >= 7 {
+        detail_lines.push(deck_source_line(player, detail_area.width as usize));
+    }
+
+    detail_lines.push(now_playing_context_line(player, detail_area.width as usize));
+    detail_lines.push(Line::from(vec![
+        status_chip,
+        Span::raw(" "),
+        chip(format!("QUEUE {queue_text}"), XP_TEXT_DARK, XP_PANEL),
+        Span::raw(" "),
+        chip(compact_time_label(player), XP_TEXT_LIGHT, XP_BLUE_MID),
+    ]));
+    detail_lines.push(meter_line(
+        "volume",
+        player.volume as f64,
+        detail_area.width.saturating_sub(18) as usize,
+        XP_MINT,
+        XP_PANEL_DARK,
+    ));
+
+    if detail_area.height >= 8 {
+        detail_lines.push(meter_line(
+            "drive",
+            playback_energy(player),
+            detail_area.width.saturating_sub(17) as usize,
+            XP_HIGHLIGHT,
+            XP_PANEL_DARK,
+        ));
+    }
+
+    detail_lines.push(transport_line(player));
+    detail_lines.push(info_message_line(player, detail_area.width as usize));
 
     let widget = Paragraph::new(detail_lines)
         .style(Style::default().bg(XP_SILVER))
@@ -584,13 +598,19 @@ fn render_now_playing(
 }
 
 fn render_album_tile(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
+    let accent = match player.status {
+        PlaybackStatus::Playing => XP_HIGHLIGHT,
+        PlaybackStatus::Paused => XP_PANEL,
+        PlaybackStatus::Stopped => XP_SKY,
+    };
+
     let widget = Paragraph::new(album_tile_lines(player))
         .alignment(Alignment::Center)
         .block(
             Block::default()
-                .title(" Deck ")
+                .title(" Album Glass ")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(XP_SKY))
+                .border_style(Style::default().fg(accent))
                 .style(Style::default().bg(XP_BLUE_MID)),
         )
         .style(Style::default().bg(XP_BLUE_MID));
@@ -1252,6 +1272,106 @@ fn compact_time_label(player: &PlayerState) -> String {
     }
 }
 
+fn track_folder_label(player: &PlayerState) -> Option<String> {
+    player
+        .current_track
+        .as_ref()
+        .and_then(|track| track.path.parent())
+        .and_then(|parent| parent.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+}
+
+fn track_shelf_label(player: &PlayerState) -> Option<String> {
+    player
+        .current_track
+        .as_ref()
+        .and_then(|track| track.path.parent())
+        .and_then(|parent| parent.parent())
+        .and_then(|grandparent| grandparent.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+}
+
+fn track_codec_label(player: &PlayerState) -> Option<String> {
+    player
+        .current_track
+        .as_ref()
+        .and_then(|track| track.path.extension())
+        .map(|ext| ext.to_string_lossy().to_uppercase())
+        .filter(|ext| !ext.is_empty())
+}
+
+fn push_spaced_span(spans: &mut Vec<Span<'static>>, span: Span<'static>) {
+    if !spans.is_empty() {
+        spans.push(Span::raw(" "));
+    }
+    spans.push(span);
+}
+
+fn deck_source_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let mut spans = Vec::new();
+
+    if width >= 58
+        && let Some(shelf) = track_shelf_label(player)
+    {
+        push_spaced_span(
+            &mut spans,
+            chip(
+                format!("SHELF {}", fit_text(&shelf, 12)),
+                XP_TEXT_DARK,
+                XP_PANEL,
+            ),
+        );
+    }
+
+    if width >= 40
+        && let Some(folder) = track_folder_label(player)
+    {
+        push_spaced_span(
+            &mut spans,
+            chip(
+                format!("FOLDER {}", fit_text(&folder, 12)),
+                XP_TEXT_DARK,
+                XP_GLASS,
+            ),
+        );
+    }
+
+    if let Some(codec) = track_codec_label(player) {
+        push_spaced_span(
+            &mut spans,
+            chip(
+                format!("CODEC {}", fit_text(&codec, 5)),
+                XP_TEXT_LIGHT,
+                XP_BLUE_DEEP,
+            ),
+        );
+    }
+
+    if width >= 54 {
+        let tail_chip = match player.duration {
+            Some(duration) if player.current_track.is_some() => chip(
+                format!("LEN {}", format_duration(duration)),
+                XP_TEXT_DARK,
+                XP_HIGHLIGHT,
+            ),
+            _ if player.current_track.is_some() => chip("LEN --:--", XP_TEXT_DARK, XP_HIGHLIGHT),
+            _ => chip("PRESS ENTER", XP_TEXT_DARK, XP_HIGHLIGHT),
+        };
+        push_spaced_span(&mut spans, tail_chip);
+    }
+
+    if spans.is_empty() {
+        push_spaced_span(&mut spans, chip("LIBRARY LANE", XP_TEXT_DARK, XP_PANEL));
+        if width >= 42 {
+            push_spaced_span(&mut spans, chip("PRESS ENTER", XP_TEXT_DARK, XP_HIGHLIGHT));
+        }
+    }
+
+    Line::from(spans)
+}
+
 fn compact_status_chip(app: &App) -> Span<'static> {
     let text = match (app.focus(), app.player().status.clone()) {
         (FocusPane::Browser, PlaybackStatus::Playing) => " LIB • PLAY ",
@@ -1648,10 +1768,14 @@ fn album_tile_lines(player: &PlayerState) -> Vec<Line<'static>> {
 
     vec![
         Line::from(vec![Span::styled(
-            "XP GLASS",
+            "MEDIA 9",
             Style::default()
                 .fg(XP_TEXT_LIGHT)
                 .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![Span::styled(
+            title_state_text(&player.status),
+            Style::default().fg(XP_SKY).add_modifier(Modifier::BOLD),
         )]),
         Line::from(vec![Span::styled(
             glyph,
@@ -1660,6 +1784,13 @@ fn album_tile_lines(player: &PlayerState) -> Vec<Line<'static>> {
                 .add_modifier(Modifier::BOLD),
         )]),
         make_signature_line(player, 8),
+        Line::from(vec![Span::styled(
+            format!(" {} ", compact_time_label(player)),
+            Style::default()
+                .fg(XP_TEXT_LIGHT)
+                .bg(XP_BLUE_DEEP)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![Span::styled(
             format!(" {:>3.0}% VOL ", player.volume * 100.0),
             Style::default()
@@ -1680,37 +1811,15 @@ fn now_playing_context_line(player: &PlayerState, width: usize) -> Line<'static>
 fn now_playing_context_text(player: &PlayerState) -> String {
     match (&player.last_error, player.current_track.as_ref()) {
         (Some(error), _) => format!("signal fault · {error}"),
-        (_, Some(track)) => {
-            let folder = track
-                .path
-                .parent()
-                .and_then(|parent| parent.file_name())
-                .map(|name| name.to_string_lossy().into_owned());
-            let shelf = track
-                .path
-                .parent()
-                .and_then(|parent| parent.parent())
-                .and_then(|grandparent| grandparent.file_name())
-                .map(|name| name.to_string_lossy().into_owned());
-            let codec = track
-                .path
-                .extension()
-                .map(|ext| ext.to_string_lossy().to_uppercase());
-
+        (_, Some(_)) => {
             let mut parts = Vec::new();
-            if let Some(shelf) = shelf
-                && !shelf.is_empty()
-            {
+            if let Some(shelf) = track_shelf_label(player) {
                 parts.push(format!("shelf · {shelf}"));
             }
-            if let Some(folder) = folder
-                && !folder.is_empty()
-            {
+            if let Some(folder) = track_folder_label(player) {
                 parts.push(format!("folder · {folder}"));
             }
-            if let Some(codec) = codec
-                && !codec.is_empty()
-            {
+            if let Some(codec) = track_codec_label(player) {
                 parts.push(format!("codec · {codec}"));
             }
 
@@ -2339,6 +2448,44 @@ mod tests {
             now_playing_context_text(&player),
             "shelf · albums   folder · night-drive   codec · FLAC"
         );
+    }
+
+    #[test]
+    fn deck_source_line_surfaces_track_origin_and_length() {
+        let mut player = sample_player();
+        player.current_track = Some(Track {
+            path: PathBuf::from("albums/night-drive/ocean-avenue.flac"),
+            title: String::from("Ocean Avenue After Midnight"),
+        });
+
+        let line = deck_source_line(&player, 80);
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| span.content.contains("SHELF albums"))
+        );
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| span.content.contains("FOLDER night-drive"))
+        );
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| span.content.contains("CODEC FLAC"))
+        );
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| span.content.contains("LEN 03:32"))
+        );
+    }
+
+    #[test]
+    fn album_tile_lines_include_state_and_time_badges() {
+        let lines = album_tile_lines(&sample_player());
+        assert!(lines[1].spans[0].content.contains("ON AIR"));
+        assert!(lines[4].spans[0].content.contains("01:13 / 03:32"));
     }
 
     #[test]
