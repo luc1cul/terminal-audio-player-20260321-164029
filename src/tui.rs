@@ -273,7 +273,7 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         List::new(items)
             .block(
                 Block::default()
-                    .title(" Navigator ")
+                    .title(" Library Tree ")
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(XP_SKY))
                     .style(Style::default().bg(XP_SILVER)),
@@ -310,7 +310,7 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
         .map(|entry| display_relative_path(app.browser().root(), &entry.path))
         .unwrap_or_else(|| String::from("."));
     let focus_hint = match app.focus() {
-        FocusPane::Browser => "library lane active · j/k move · Enter open/play",
+        FocusPane::Browser => "library lane active · j/k glide · Enter load/open",
         FocusPane::Player => "playback deck active · Tab returns to the library lane",
     };
 
@@ -329,7 +329,7 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
                 ),
             ]),
             Line::from(vec![
-                browser_label("Pick"),
+                browser_label("Cue"),
                 Span::styled(
                     fit_text(&selection_name, area.width.saturating_sub(9) as usize),
                     Style::default()
@@ -338,7 +338,7 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
                 ),
             ]),
             Line::from(vec![
-                browser_label("Path"),
+                browser_label("Shelf"),
                 Span::styled(
                     fit_text(&selection_path, area.width.saturating_sub(9) as usize),
                     Style::default().fg(XP_BLUE),
@@ -361,7 +361,7 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
                 ),
             ]),
             Line::from(vec![
-                browser_label("Selection"),
+                browser_label("Cue"),
                 Span::styled(
                     fit_text(&selection_name, area.width.saturating_sub(15) as usize),
                     Style::default()
@@ -370,7 +370,7 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
                 ),
             ]),
             Line::from(vec![
-                browser_label("Path"),
+                browser_label("Shelf"),
                 Span::styled(
                     fit_text(&selection_path, area.width.saturating_sub(10) as usize),
                     Style::default().fg(XP_BLUE),
@@ -384,7 +384,7 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
                 XP_PANEL_DARK,
             ),
             Line::from(vec![
-                browser_label("Action"),
+                browser_label("Move"),
                 Span::styled(
                     fit_text(
                         browser_action_hint(selected),
@@ -394,7 +394,7 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
                 ),
             ]),
             Line::from(vec![
-                browser_label("Focus"),
+                browser_label("Lane"),
                 Span::styled(
                     fit_text(focus_hint, area.width.saturating_sub(11) as usize),
                     Style::default().fg(XP_BLUE),
@@ -406,7 +406,7 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
     let widget = Paragraph::new(lines)
         .block(
             Block::default()
-                .title(" Inspector ")
+                .title(" Lane Monitor ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(XP_SKY))
                 .style(Style::default().bg(XP_SILVER)),
@@ -795,7 +795,7 @@ fn render_keys(frame: &mut ratatui::Frame<'_>, area: Rect) {
 }
 
 fn render_queue(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
-    let block = xp_panel(" Queue Preview ", false);
+    let block = xp_panel(" Cue Stack ", false);
     frame.render_widget(block, area);
 
     let inner = area.inner(Margin {
@@ -868,6 +868,7 @@ fn render_queue(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect
 
 fn render_status_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     let block = Block::default()
+        .title(" Status Ribbon ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(XP_BLUE_DEEP))
         .style(Style::default().bg(XP_SILVER));
@@ -1064,11 +1065,11 @@ fn browser_state_chip(entry: Option<&BrowserEntry>) -> Span<'static> {
 fn browser_action_hint(entry: Option<&BrowserEntry>) -> &'static str {
     match entry {
         Some(entry) if entry.kind == EntryKind::Directory && entry.expanded => {
-            "Enter toggles folder · ← collapses upward"
+            "Enter folds this shelf · ← climbs one level"
         }
-        Some(entry) if entry.kind == EntryKind::Directory => "Enter or → opens folder contents",
-        Some(_) => "Enter starts playback from this track",
-        None => "Point the player at a folder with supported audio",
+        Some(entry) if entry.kind == EntryKind::Directory => "Enter or → opens the folder shelf",
+        Some(_) => "Enter loads this track into the deck",
+        None => "Point the library lane at a folder with supported audio",
     }
 }
 
@@ -1252,7 +1253,7 @@ fn status_chip_line(app: &App) -> Line<'static> {
     };
 
     Line::from(vec![
-        chip("RIBBON", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+        chip("STATUS", XP_TEXT_LIGHT, XP_BLUE_DEEP),
         Span::raw(" "),
         focus_chip,
         Span::raw(" "),
@@ -1277,7 +1278,7 @@ fn status_transport_text(player: &PlayerState) -> String {
                 player.queue.len()
             )
         }
-        None => String::from("Standby deck — load something from the library"),
+        None => String::from("Standby deck — load something from the library lane"),
     }
 }
 
@@ -1379,7 +1380,7 @@ fn queue_marquee_text(player: &PlayerState) -> String {
                 player.queue.len()
             )
         }
-        None => String::from("Pick a track from the library to populate the playback stack."),
+        None => String::from("Pick a track from the library lane to seed the playback stack."),
     }
 }
 
@@ -1406,7 +1407,7 @@ fn queue_marquee_line(player: &PlayerState, width: usize) -> Line<'static> {
 fn queue_lines(player: &PlayerState, width: usize, rows: usize) -> Vec<Line<'static>> {
     if player.queue.is_empty() {
         return vec![Line::from(vec![Span::styled(
-            " Queue is empty — pick a track from the library.",
+            " Cue stack is empty — pick a track from the library lane.",
             Style::default().fg(XP_TEXT_DARK),
         )])];
     }
@@ -1477,15 +1478,15 @@ fn queue_lines(player: &PlayerState, width: usize, rows: usize) -> Vec<Line<'sta
 
 fn queue_footer_line(player: &PlayerState, width: usize) -> Line<'static> {
     let text = match (&player.status, player.queue.is_empty()) {
-        (_, true) => "Enter from the library seeds the active playback stack.",
+        (_, true) => "Enter in the library lane seeds the playback stack.",
         (PlaybackStatus::Playing, false) => {
-            "n/p glides through the stack · Enter from library rebuilds the deck."
+            "n/p glides through the stack · Enter in the library lane reseeds the deck."
         }
         (PlaybackStatus::Paused, false) => {
-            "Space resumes the staged deck · Enter from library swaps in a fresh stack."
+            "Space relights the deck · Enter in the library lane swaps the stack."
         }
         (PlaybackStatus::Stopped, false) => {
-            "Space starts the staged stack · Enter from library re-roots playback order."
+            "Space starts the staged stack · Enter in the library lane rebuilds the deck."
         }
     };
 
@@ -2134,6 +2135,22 @@ mod tests {
     }
 
     #[test]
+    fn browser_action_hint_for_track_mentions_the_deck() {
+        let entry = BrowserEntry {
+            path: PathBuf::from("music/song.mp3"),
+            name: String::from("song.mp3"),
+            depth: 1,
+            kind: EntryKind::File,
+            expanded: false,
+        };
+
+        assert_eq!(
+            browser_action_hint(Some(&entry)),
+            "Enter loads this track into the deck"
+        );
+    }
+
+    #[test]
     fn display_relative_path_prefers_root_relative_form() {
         let root = Path::new("/music");
         let child = Path::new("/music/ambient/dreams/song.flac");
@@ -2236,6 +2253,13 @@ mod tests {
             status_transport_text(&player),
             "Stack loaded · 3 tracks waiting in the deck"
         );
+    }
+
+    #[test]
+    fn queue_footer_line_empty_mentions_library_lane() {
+        let player = PlayerState::default();
+        let footer = queue_footer_line(&player, 80);
+        assert!(footer.spans[0].content.contains("library lane"));
     }
 
     #[test]
