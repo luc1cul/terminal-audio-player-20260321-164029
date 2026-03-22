@@ -809,7 +809,19 @@ fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
         return;
     }
 
-    if inner.width >= 40 && inner.height >= 7 {
+    if inner.width >= 40 && inner.height == 7 {
+        let ladder_width = if inner.width >= 58 { 19 } else { 16 };
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(20), Constraint::Length(ladder_width)])
+            .split(inner);
+
+        render_visualizer_deck(frame, player, columns[0]);
+        render_signal_rise(frame, player, columns[1]);
+        return;
+    }
+
+    if inner.width >= 40 && inner.height >= 8 {
         let ladder_width = if inner.width >= 58 { 19 } else { 16 };
         let columns = Layout::default()
             .direction(Direction::Horizontal)
@@ -916,6 +928,73 @@ fn signal_rail_footer_line(player: &PlayerState, width: usize) -> Line<'static> 
         fit_text(&footer, width),
         Style::default().fg(XP_SILVER),
     )])
+}
+
+fn render_signal_rise(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
+    let block = Block::default()
+        .title(" Signal Rise ")
+        .borders(Borders::TOP | Borders::BOTTOM)
+        .border_style(Style::default().fg(XP_SKY))
+        .style(Style::default().bg(XP_BLUE));
+    frame.render_widget(block, area);
+
+    let inner = area.inner(Margin {
+        vertical: 1,
+        horizontal: 0,
+    });
+    if inner.width < 10 || inner.height < 2 {
+        return;
+    }
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(2),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let header = Paragraph::new(Line::from(vec![
+        visualizer_state_chip(player),
+        Span::raw(" "),
+        Span::styled(
+            fit_text(
+                &format!(
+                    "rail opens · {} · {}",
+                    visualizer_preset(player),
+                    compact_time_label(player)
+                ),
+                rows[0].width.saturating_sub(9) as usize,
+            ),
+            Style::default().fg(XP_SKY).add_modifier(Modifier::BOLD),
+        ),
+    ]))
+    .style(Style::default().bg(XP_BLUE));
+    frame.render_widget(header, rows[0]);
+
+    let meters = Paragraph::new(visualizer_meter_lines(
+        player,
+        rows[1].width as usize,
+        rows[1].height as usize,
+    ))
+    .style(Style::default().bg(XP_BLUE));
+    frame.render_widget(meters, rows[1]);
+
+    let footer = Paragraph::new(Line::from(vec![Span::styled(
+        fit_text(&signal_rise_footer_text(player), rows[2].width as usize),
+        Style::default().fg(XP_HIGHLIGHT),
+    )]))
+    .style(Style::default().bg(XP_BLUE));
+    frame.render_widget(footer, rows[2]);
+}
+
+fn signal_rise_footer_text(player: &PlayerState) -> &'static str {
+    match player.status {
+        PlaybackStatus::Playing => "crest rail rising toward the full ladder",
+        PlaybackStatus::Paused => "held rail waiting to reopen the full ladder",
+        PlaybackStatus::Stopped => "queue a track to raise the full ladder",
+    }
 }
 
 fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
@@ -3256,9 +3335,18 @@ mod tests {
     }
 
     #[test]
-    fn wide_taller_signal_deck_graduates_to_signal_ladder() {
+    fn wide_first_tall_signal_band_uses_signal_rise() {
         let screen = render_player_focus_snapshot(120, 25);
+        assert!(screen.contains("Signal Rise"));
+        assert!(!screen.contains("LEVEL RAIL"));
+        assert!(!screen.contains("Signal Ladder"));
+    }
+
+    #[test]
+    fn wide_taller_signal_deck_graduates_to_signal_ladder() {
+        let screen = render_player_focus_snapshot(120, 40);
         assert!(screen.contains("Signal Ladder"));
+        assert!(!screen.contains("Signal Rise"));
         assert!(!screen.contains("LEVEL RAIL"));
     }
 
