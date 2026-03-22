@@ -547,7 +547,12 @@ fn render_now_playing(
             hero_chip,
             Span::raw(" "),
             Span::styled(
-                fit_text(&track_name, detail_area.width.saturating_sub(13) as usize),
+                animated_marquee(
+                    player,
+                    &track_name,
+                    detail_area.width.saturating_sub(13) as usize,
+                    4.0,
+                ),
                 Style::default()
                     .fg(XP_TEXT_DARK)
                     .add_modifier(Modifier::BOLD),
@@ -1288,7 +1293,7 @@ fn status_transport_line(player: &PlayerState, width: usize) -> Line<'static> {
             chip("DECK A", XP_TEXT_DARK, XP_PANEL),
             Span::raw(" "),
             Span::styled(
-                fit_text(&track.title, width.saturating_sub(18).max(6)),
+                animated_marquee(player, &track.title, width.saturating_sub(18).max(6), 4.4),
                 Style::default()
                     .fg(XP_TEXT_DARK)
                     .add_modifier(Modifier::BOLD),
@@ -1300,9 +1305,11 @@ fn status_transport_line(player: &PlayerState, width: usize) -> Line<'static> {
             chip("STACK", XP_TEXT_DARK, XP_PANEL),
             Span::raw(" "),
             Span::styled(
-                fit_text(
+                animated_marquee(
+                    player,
                     &status_transport_text(player),
                     width.saturating_sub(11).max(6),
+                    2.8,
                 ),
                 Style::default().fg(XP_TEXT_DARK),
             ),
@@ -1311,9 +1318,11 @@ fn status_transport_line(player: &PlayerState, width: usize) -> Line<'static> {
             chip("STANDBY", XP_TEXT_LIGHT, XP_BLUE_DEEP),
             Span::raw(" "),
             Span::styled(
-                fit_text(
+                animated_marquee(
+                    player,
                     &status_transport_text(player),
                     width.saturating_sub(13).max(6),
+                    2.4,
                 ),
                 Style::default().fg(XP_TEXT_DARK),
             ),
@@ -1395,9 +1404,11 @@ fn queue_marquee_line(player: &PlayerState, width: usize) -> Line<'static> {
         chip(label, fg, bg),
         Span::raw(" "),
         Span::styled(
-            fit_text(
+            animated_marquee(
+                player,
                 &queue_marquee_text(player),
                 width.saturating_sub(label.chars().count() + 7).max(8),
+                3.6,
             ),
             Style::default().fg(XP_TEXT_DARK),
         ),
@@ -1632,7 +1643,7 @@ fn album_tile_lines(player: &PlayerState) -> Vec<Line<'static>> {
 
 fn now_playing_context_line(player: &PlayerState, width: usize) -> Line<'static> {
     Line::from(vec![Span::styled(
-        fit_text(&now_playing_context_text(player), width.max(1)),
+        animated_marquee(player, &now_playing_context_text(player), width.max(1), 3.0),
         Style::default().fg(XP_BLUE),
     )])
 }
@@ -1851,6 +1862,46 @@ fn info_message_line(player: &PlayerState, width: usize) -> Line<'static> {
                 Style::default().fg(XP_BLUE),
             ),
         ]),
+    }
+}
+
+fn animated_marquee(player: &PlayerState, text: &str, width: usize, speed: f64) -> String {
+    if width == 0 {
+        return String::new();
+    }
+
+    let char_count = text.chars().count();
+    if char_count <= width {
+        return text.to_string();
+    }
+
+    let separator = "   ✦   ";
+    let cycle_text = format!("{text}{separator}{text}");
+    let cycle_chars = cycle_text.chars().collect::<Vec<_>>();
+    let cycle_len = text.chars().count() + separator.chars().count();
+    let offset = marquee_offset(player, cycle_len, speed);
+
+    cycle_chars
+        .into_iter()
+        .cycle()
+        .skip(offset)
+        .take(width)
+        .collect()
+}
+
+fn marquee_offset(player: &PlayerState, cycle_len: usize, speed: f64) -> usize {
+    if cycle_len == 0 {
+        return 0;
+    }
+
+    match player.status {
+        PlaybackStatus::Stopped => 0,
+        PlaybackStatus::Paused => (track_seed(player) as usize) % cycle_len,
+        PlaybackStatus::Playing => {
+            (((player.position.as_secs_f64() * speed).floor() as usize)
+                + (track_seed(player) as usize % cycle_len))
+                % cycle_len
+        }
     }
 }
 
@@ -2083,6 +2134,27 @@ mod tests {
     fn fit_text_adds_ellipsis_when_needed() {
         assert_eq!(fit_text("abcdef", 4), "abc…");
         assert_eq!(fit_text("ok", 8), "ok");
+    }
+
+    #[test]
+    fn animated_marquee_leaves_short_text_untouched() {
+        assert_eq!(
+            animated_marquee(&sample_player(), "short", 12, 4.0),
+            "short"
+        );
+    }
+
+    #[test]
+    fn animated_marquee_advances_for_playing_tracks() {
+        let mut player = sample_player();
+        player.position = Duration::from_secs(0);
+        let first = animated_marquee(&player, "Ocean Avenue After Midnight", 10, 4.0);
+        player.position = Duration::from_secs(3);
+        let later = animated_marquee(&player, "Ocean Avenue After Midnight", 10, 4.0);
+
+        assert_eq!(first.chars().count(), 10);
+        assert_eq!(later.chars().count(), 10);
+        assert_ne!(first, later);
     }
 
     #[test]
