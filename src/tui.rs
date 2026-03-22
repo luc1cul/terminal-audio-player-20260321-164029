@@ -158,10 +158,8 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
-    let root_label = fit_text(
-        &app.browser().root().display().to_string(),
-        area.width.saturating_sub(20) as usize,
-    );
+    let root_label =
+        browser_root_label(app.browser().root(), area.width.saturating_sub(20) as usize);
     let title = match app.focus() {
         FocusPane::Browser => format!(" Media Library ◆ {root_label}"),
         FocusPane::Player => format!(" Media Library ◇ {root_label}"),
@@ -838,6 +836,38 @@ fn browser_depth_ratio(entries: &[BrowserEntry], selected: Option<&BrowserEntry>
     (selected_depth as f64 / depth_ceiling as f64).clamp(0.0, 1.0)
 }
 
+fn browser_root_label(root: &Path, max_chars: usize) -> String {
+    if max_chars <= 18 {
+        return fit_text(
+            &root
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| root.display().to_string()),
+            max_chars,
+        );
+    }
+
+    if max_chars <= 34 {
+        return fit_text(&tail_path(root, 2), max_chars);
+    }
+
+    fit_text(&root.display().to_string(), max_chars)
+}
+
+fn tail_path(path: &Path, component_count: usize) -> String {
+    let parts = path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    if parts.is_empty() {
+        return String::from(".");
+    }
+
+    let start = parts.len().saturating_sub(component_count.max(1));
+    parts[start..].join("/")
+}
+
 fn display_relative_path(root: &Path, path: &Path) -> String {
     if path == root {
         return String::from(".");
@@ -1506,5 +1536,12 @@ mod tests {
             "ambient/dreams/song.flac"
         );
         assert_eq!(display_relative_path(root, root), ".");
+    }
+
+    #[test]
+    fn browser_root_label_prefers_tail_on_tight_widths() {
+        let root = Path::new("/Users/lucw/.openclaw/workspace/terminal-audio-player");
+        assert_eq!(browser_root_label(root, 16), "terminal-audio-…");
+        assert_eq!(browser_root_label(root, 28), "workspace/terminal-audio-pl…");
     }
 }
