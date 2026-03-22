@@ -118,11 +118,6 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &App) {
 }
 
 fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
-    let title = match app.player().status {
-        PlaybackStatus::Playing => "Now Playing",
-        PlaybackStatus::Paused => "Paused",
-        PlaybackStatus::Stopped => "Library Ready",
-    };
     let mood = if area.width < 72 {
         "  XP deck  "
     } else if area.width < 96 {
@@ -130,8 +125,49 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     } else {
         "  XP blue glass • media deck • wave tank  "
     };
+    let focus_chip = if area.width < 84 {
+        match app.focus() {
+            FocusPane::Browser => chip("LIB", XP_TEXT_DARK, XP_HIGHLIGHT),
+            FocusPane::Player => chip("DECK", XP_TEXT_LIGHT, XP_BLUE_MID),
+        }
+    } else {
+        match app.focus() {
+            FocusPane::Browser => chip("LIBRARY LANE", XP_TEXT_DARK, XP_HIGHLIGHT),
+            FocusPane::Player => chip("PLAYBACK DECK", XP_TEXT_LIGHT, XP_BLUE_MID),
+        }
+    };
+    let stack_chip = match (app.player().queue_index, app.player().queue.is_empty()) {
+        (Some(index), false) => chip(
+            format!("STACK {}/{}", index + 1, app.player().queue.len()),
+            XP_TEXT_DARK,
+            XP_PANEL,
+        ),
+        _ => chip(
+            format!("STACK {}", app.player().queue.len()),
+            XP_TEXT_DARK,
+            XP_PANEL,
+        ),
+    };
 
-    let text = Line::from(vec![
+    let state_chip = match app.player().status {
+        PlaybackStatus::Playing => chip(
+            title_state_text(&app.player().status),
+            XP_TEXT_DARK,
+            XP_MINT,
+        ),
+        PlaybackStatus::Paused => chip(
+            title_state_text(&app.player().status),
+            XP_TEXT_DARK,
+            XP_HIGHLIGHT,
+        ),
+        PlaybackStatus::Stopped => chip(
+            title_state_text(&app.player().status),
+            XP_TEXT_LIGHT,
+            XP_BLUE_DEEP,
+        ),
+    };
+
+    let mut spans = vec![
         Span::styled(
             " Terminal Audio Player ",
             Style::default()
@@ -140,14 +176,17 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(mood, Style::default().fg(XP_TEXT_LIGHT).bg(XP_BLUE)),
-        Span::styled(
-            format!(" {} ", title),
-            Style::default()
-                .fg(XP_TEXT_DARK)
-                .bg(XP_HIGHLIGHT)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]);
+        focus_chip,
+        Span::raw(" "),
+        state_chip,
+    ];
+
+    if area.width >= 112 {
+        spans.push(Span::raw(" "));
+        spans.push(stack_chip);
+    }
+
+    let text = Line::from(spans);
 
     if area.height < 3 {
         let widget = Paragraph::new(text).style(Style::default().bg(XP_BLUE));
@@ -164,6 +203,14 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     frame.render_widget(widget, area);
 }
 
+fn title_state_text(status: &PlaybackStatus) -> &'static str {
+    match status {
+        PlaybackStatus::Playing => "ON AIR",
+        PlaybackStatus::Paused => "HELD",
+        PlaybackStatus::Stopped => "READY",
+    }
+}
+
 fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     let compact_browser = area.width < 84 || area.height < 12;
     let root_label = browser_root_label(
@@ -175,8 +222,8 @@ fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         },
     );
     let title = match app.focus() {
-        FocusPane::Browser => format!(" Media Library ◆ {root_label}"),
-        FocusPane::Player => format!(" Media Library ◇ {root_label}"),
+        FocusPane::Browser => format!(" Library Lane ◆ {root_label}"),
+        FocusPane::Player => format!(" Library Lane ◇ {root_label}"),
     };
 
     let shell = xp_panel(&title, app.focus() == FocusPane::Browser);
@@ -263,8 +310,8 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
         .map(|entry| display_relative_path(app.browser().root(), &entry.path))
         .unwrap_or_else(|| String::from("."));
     let focus_hint = match app.focus() {
-        FocusPane::Browser => "browse lane active · j/k move · Enter open/play",
-        FocusPane::Player => "player lane active · Tab to return to library",
+        FocusPane::Browser => "library lane active · j/k move · Enter open/play",
+        FocusPane::Player => "playback deck active · Tab returns to the library lane",
     };
 
     let compact = area.width < 42 || area.height < 8;
@@ -431,9 +478,9 @@ fn render_now_playing(
     area: Rect,
 ) {
     let title = if focused {
-        " Now Playing ◆ "
+        " Playback Deck ◆ "
     } else {
-        " Now Playing ◇ "
+        " Playback Deck ◇ "
     };
 
     let block = xp_panel(title, focused);
@@ -452,7 +499,7 @@ fn render_now_playing(
         .current_track
         .as_ref()
         .map(|track| track.title.clone())
-        .unwrap_or_else(|| String::from("Drop into the library and press Enter"));
+        .unwrap_or_else(|| String::from("Pick a track in the library lane and press Enter"));
 
     let queue_text = match (player.queue_index, player.queue.is_empty()) {
         (Some(index), false) => format!("{} / {}", index + 1, player.queue.len()),
@@ -1103,7 +1150,7 @@ fn compact_now_playing_lines(
         .current_track
         .as_ref()
         .map(|track| track.title.clone())
-        .unwrap_or_else(|| String::from("Drop into the library and press Enter"));
+        .unwrap_or_else(|| String::from("Pick a track in the library lane and press Enter"));
     let queue_text = match (player.queue_index, player.queue.is_empty()) {
         (Some(index), false) => format!("Q {} / {}", index + 1, player.queue.len()),
         _ => String::from("Q 0 / 0"),
@@ -1469,7 +1516,7 @@ fn help_lines(width: usize, rows: usize) -> Vec<Line<'static>> {
             "j/k move · Enter open/play · ←/→ fold folders",
         ),
         (
-            "PLAYER",
+            "DECK",
             XP_TEXT_DARK,
             XP_MINT,
             "j/k volume · +/- fine tune · h/l seek ribbon",
@@ -2035,6 +2082,13 @@ mod tests {
     fn fit_text_adds_ellipsis_when_needed() {
         assert_eq!(fit_text("abcdef", 4), "abc…");
         assert_eq!(fit_text("ok", 8), "ok");
+    }
+
+    #[test]
+    fn title_state_text_matches_playback_status() {
+        assert_eq!(title_state_text(&PlaybackStatus::Playing), "ON AIR");
+        assert_eq!(title_state_text(&PlaybackStatus::Paused), "HELD");
+        assert_eq!(title_state_text(&PlaybackStatus::Stopped), "READY");
     }
 
     #[test]

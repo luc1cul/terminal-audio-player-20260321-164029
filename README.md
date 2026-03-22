@@ -7,8 +7,8 @@ A lightweight Rust terminal audio player with a decoupled audio engine and TUI f
 - Pure terminal UI with `ratatui` + `crossterm`
 - Audio playback powered by `rodio`
 - Supports **MP3, FLAC, WAV, OGG**
-- Left-hand file browser with navigator + inspector chrome
-- Playback controls, richer queue preview, and transport/status ribbon
+- Left-hand library lane with navigator + inspector chrome
+- Playback deck controls, richer cue-stack preview, and transport/status ribbon
 - Windows XP-inspired glossy media deck with blue-glass chrome and responsive narrow-layout fallbacks
 - Animated spectrum, wave, and glow visualizer keyed to playback state
 - Decoupled architecture using `std::sync::mpsc` channels

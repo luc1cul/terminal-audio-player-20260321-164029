@@ -36,7 +36,7 @@ impl App {
             player: PlayerState::default(),
             focus: FocusPane::Browser,
             status_line: String::from(
-                "Tab switches focus · Enter opens/plays · n/p next/prev · s stop · q quit",
+                "Library lane ready · Enter loads · Tab swaps lanes · n/p step the stack · q quits",
             ),
             command_tx,
             event_rx,
@@ -98,11 +98,11 @@ impl App {
                 };
                 self.status_line = match self.focus {
                     FocusPane::Browser => {
-                        String::from("Browser focus: j/k navigate · Enter opens or plays")
+                        String::from("Library lane active · j/k browse · Enter loads or opens")
                     }
-                    FocusPane::Player => {
-                        String::from("Player focus: j/k volume down/up · Space toggles playback")
-                    }
+                    FocusPane::Player => String::from(
+                        "Playback deck active · j/k trims volume · Space toggles transport",
+                    ),
                 };
             }
             KeyCode::Enter => self.activate_selected()?,
@@ -246,5 +246,27 @@ mod tests {
             AudioCommand::TogglePause => {}
             other => panic!("expected TogglePause, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tab_updates_status_line_to_lane_language() {
+        let temp = tempdir().unwrap();
+        let (command_tx, _command_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let mut app = App::new(temp.path().to_path_buf(), command_tx, event_rx).unwrap();
+
+        app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(
+            app.status_line(),
+            "Playback deck active · j/k trims volume · Space toggles transport"
+        );
+
+        app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(
+            app.status_line(),
+            "Library lane active · j/k browse · Enter loads or opens"
+        );
     }
 }
