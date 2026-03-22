@@ -599,7 +599,7 @@ fn render_album_tile(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
 
 fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
     let block = Block::default()
-        .title(" Wave Tank ")
+        .title(" Signal Deck ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(XP_BLUE_DEEP))
         .style(Style::default().bg(XP_BLUE_DEEP));
@@ -795,7 +795,7 @@ fn render_progress(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: R
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Seek Ribbon ")
+                .title(" Time Ribbon ")
                 .border_style(Style::default().fg(XP_BLUE_DEEP))
                 .style(Style::default().bg(XP_SILVER)),
         )
@@ -811,7 +811,7 @@ fn render_progress(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: R
 }
 
 fn render_keys(frame: &mut ratatui::Frame<'_>, area: Rect) {
-    let block = xp_panel(" Controls ", false);
+    let block = xp_panel(" Deck Guide ", false);
     frame.render_widget(block, area);
 
     let inner = area.inner(Margin {
