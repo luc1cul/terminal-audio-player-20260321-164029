@@ -1078,10 +1078,22 @@ fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, 
 }
 
 fn render_signal_ladder(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
+    // The bloom effect happens at the first stage of the full ladder view.
+    // The transition from render_signal_rise occurs when the visualizer's
+    // inner height transitions from 7 to 8. This function is called with
+    // an area of height 8 in that initial "bloom" frame.
+    let is_blooming = area.height == 8;
+
+    let border_style = if is_blooming {
+        Style::default().fg(XP_HIGHLIGHT)
+    } else {
+        Style::default().fg(XP_SKY)
+    };
+
     let block = Block::default()
         .title(" Signal Ladder ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(XP_SKY))
+        .border_style(border_style)
         .style(Style::default().bg(XP_BLUE));
     frame.render_widget(block, area);
 
@@ -1140,10 +1152,16 @@ fn render_signal_ladder(frame: &mut ratatui::Frame<'_>, player: &PlayerState, ar
     .style(Style::default().bg(XP_BLUE));
     frame.render_widget(meters, rows[1]);
 
+    let footer_text = if is_blooming {
+        "the full ladder blooms from the signal rise"
+    } else {
+        playback_mood(player)
+    };
+
     let footer_lines = if rows[2].height > 1 {
         vec![
             Line::from(vec![Span::styled(
-                fit_text(playback_mood(player), rows[2].width as usize),
+                fit_text(footer_text, rows[2].width as usize),
                 Style::default().fg(XP_HIGHLIGHT),
             )]),
             Line::from(vec![Span::styled(
@@ -1153,7 +1171,7 @@ fn render_signal_ladder(frame: &mut ratatui::Frame<'_>, player: &PlayerState, ar
         ]
     } else {
         vec![Line::from(vec![Span::styled(
-            fit_text(playback_mood(player), rows[2].width as usize),
+            fit_text(footer_text, rows[2].width as usize),
             Style::default().fg(XP_HIGHLIGHT),
         )])]
     };
