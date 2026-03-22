@@ -468,6 +468,33 @@ fn render_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             return;
         }
 
+        if let Some((now_height, visualizer_height, progress_height, guide_height, queue_height)) =
+            wide_deck_guide_reentry_layout(area.height)
+        {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(now_height),
+                    Constraint::Length(visualizer_height),
+                    Constraint::Length(progress_height),
+                    Constraint::Length(guide_height),
+                    Constraint::Length(queue_height),
+                ])
+                .split(area);
+
+            render_now_playing(
+                frame,
+                app.player(),
+                app.focus() == FocusPane::Player,
+                rows[0],
+            );
+            render_visualizer(frame, app.player(), rows[1]);
+            render_progress(frame, app.player(), rows[2]);
+            render_keys(frame, rows[3]);
+            render_queue(frame, app.player(), rows[4]);
+            return;
+        }
+
         let now_height: u16 = if area.height >= 30 { 9 } else { 8 };
         let rows = Layout::default()
             .direction(Direction::Vertical)
@@ -536,6 +563,31 @@ fn wide_queue_reentry_layout(area_height: u16) -> Option<(u16, u16, u16, u16)> {
     let now_height = area_height - visualizer_height - progress_height - queue_height;
 
     Some((now_height, visualizer_height, progress_height, queue_height))
+}
+
+fn wide_deck_guide_reentry_layout(area_height: u16) -> Option<(u16, u16, u16, u16, u16)> {
+    if !(26..31).contains(&area_height) {
+        return None;
+    }
+
+    let queue_height = match area_height {
+        26 => 4,
+        27 | 28 => 5,
+        _ => 6,
+    };
+    let guide_height = 4;
+    let progress_height = 3;
+    let visualizer_height = if area_height >= 30 { 9 } else { 8 };
+    let now_height =
+        area_height - visualizer_height - progress_height - guide_height - queue_height;
+
+    Some((
+        now_height,
+        visualizer_height,
+        progress_height,
+        guide_height,
+        queue_height,
+    ))
 }
 
 fn render_compact_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
@@ -2101,47 +2153,90 @@ fn queue_track_name(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
+fn deck_guide_line(label: &str, fg: Color, bg: Color, text: &str, width: usize) -> Line<'static> {
+    Line::from(vec![
+        chip(label, fg, bg),
+        Span::raw(" "),
+        Span::styled(
+            fit_text(text, width.saturating_sub(label.chars().count() + 7).max(8)),
+            Style::default().fg(XP_TEXT_DARK),
+        ),
+    ])
+}
+
 fn help_lines(width: usize, rows: usize) -> Vec<Line<'static>> {
-    let groups = [
-        (
-            "TRANSPORT",
-            XP_TEXT_DARK,
-            XP_HIGHLIGHT,
-            "Space play/pause · s stop · n/p queue step",
-        ),
-        (
-            "BROWSER",
-            XP_TEXT_LIGHT,
-            XP_BLUE_DEEP,
-            "j/k move · Enter open/play · ←/→ fold folders",
-        ),
-        (
-            "DECK",
-            XP_TEXT_DARK,
-            XP_MINT,
-            "j/k volume · +/- fine tune · h/l seek ribbon",
-        ),
-        (
-            "FOCUS",
+    let groups: Vec<(&str, Color, Color, &str)> = match rows.max(1).min(4) {
+        1 => vec![(
+            "FLOW",
             XP_TEXT_DARK,
             XP_PANEL,
-            "Tab swaps library/deck focus · q quits the player",
-        ),
-    ];
+            "Enter cue/play · Space pause · j/k move/vol · Tab lane↔deck",
+        )],
+        2 => vec![
+            (
+                "TRANSPORT",
+                XP_TEXT_DARK,
+                XP_HIGHLIGHT,
+                "Space play/pause · s stop · n/p queue step",
+            ),
+            (
+                "FLOW",
+                XP_TEXT_DARK,
+                XP_PANEL,
+                "Enter cue/play · j/k browse/vol · h/l seek · Tab lane↔deck",
+            ),
+        ],
+        3 => vec![
+            (
+                "TRANSPORT",
+                XP_TEXT_DARK,
+                XP_HIGHLIGHT,
+                "Space play/pause · s stop · n/p queue step",
+            ),
+            (
+                "BROWSER",
+                XP_TEXT_LIGHT,
+                XP_BLUE_DEEP,
+                "j/k move · Enter open/play · ←/→ fold folders",
+            ),
+            (
+                "DECK",
+                XP_TEXT_DARK,
+                XP_MINT,
+                "j/k volume · +/- trim · h/l seek · Tab lane↔deck",
+            ),
+        ],
+        _ => vec![
+            (
+                "TRANSPORT",
+                XP_TEXT_DARK,
+                XP_HIGHLIGHT,
+                "Space play/pause · s stop · n/p queue step",
+            ),
+            (
+                "BROWSER",
+                XP_TEXT_LIGHT,
+                XP_BLUE_DEEP,
+                "j/k move · Enter open/play · ←/→ fold folders",
+            ),
+            (
+                "DECK",
+                XP_TEXT_DARK,
+                XP_MINT,
+                "j/k volume · +/- fine tune · h/l seek ribbon",
+            ),
+            (
+                "FOCUS",
+                XP_TEXT_DARK,
+                XP_PANEL,
+                "Tab swaps lane/deck focus · q quits the player",
+            ),
+        ],
+    };
 
     groups
         .into_iter()
-        .take(rows.max(1).min(groups.len()))
-        .map(|(label, fg, bg, text)| {
-            Line::from(vec![
-                chip(label, fg, bg),
-                Span::raw(" "),
-                Span::styled(
-                    fit_text(text, width.saturating_sub(label.chars().count() + 7).max(8)),
-                    Style::default().fg(XP_TEXT_DARK),
-                ),
-            ])
-        })
+        .map(|(label, fg, bg, text)| deck_guide_line(label, fg, bg, text, width))
         .collect()
 }
 
@@ -3075,6 +3170,22 @@ mod tests {
     }
 
     #[test]
+    fn compact_deck_guide_lines_keep_lane_deck_and_focus_controls_visible() {
+        let lines = help_lines(120, 2);
+        assert_eq!(lines.len(), 2);
+
+        let text = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(text.contains("Enter cue/play"));
+        assert!(text.contains("h/l seek"));
+        assert!(text.contains("lane↔deck"));
+    }
+
+    #[test]
     fn wide_short_layout_signal_deck_shows_compact_wash_caption() {
         let temp = tempdir().unwrap();
         let (command_tx, _command_rx) = mpsc::channel();
@@ -3113,12 +3224,34 @@ mod tests {
     }
 
     #[test]
+    fn wide_deck_guide_reentry_layout_preserves_the_bridge_band() {
+        assert_eq!(wide_deck_guide_reentry_layout(25), None);
+        assert_eq!(wide_deck_guide_reentry_layout(26), Some((7, 8, 3, 4, 4)));
+        assert_eq!(wide_deck_guide_reentry_layout(27), Some((7, 8, 3, 4, 5)));
+        assert_eq!(wide_deck_guide_reentry_layout(28), Some((8, 8, 3, 4, 5)));
+        assert_eq!(wide_deck_guide_reentry_layout(29), Some((8, 8, 3, 4, 6)));
+        assert_eq!(wide_deck_guide_reentry_layout(30), Some((8, 9, 3, 4, 6)));
+        assert_eq!(wide_deck_guide_reentry_layout(31), None);
+    }
+
+    #[test]
     fn wide_queue_reentry_keeps_level_rail_when_cue_stack_returns() {
         let screen = render_player_focus_snapshot(120, 26);
         assert!(screen.contains("Cue Stack"));
         assert!(screen.contains("LEVEL RAIL"));
         assert!(screen.contains("STACK 2/3"));
         assert!(screen.contains("AIR   2."));
+        assert!(!screen.contains("Signal Ladder"));
+    }
+
+    #[test]
+    fn wide_deck_guide_reentry_keeps_level_rail_when_five_band_layout_returns() {
+        let screen = render_player_focus_snapshot(120, 34);
+        assert!(screen.contains("Deck Guide"));
+        assert!(screen.contains("Cue Stack"));
+        assert!(screen.contains("LEVEL RAIL"));
+        assert!(screen.contains("Enter cue/play"));
+        assert!(screen.contains("lane↔deck"));
         assert!(!screen.contains("Signal Ladder"));
     }
 
