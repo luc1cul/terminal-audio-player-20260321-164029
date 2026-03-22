@@ -416,13 +416,66 @@ fn render_browser_inspector(frame: &mut ratatui::Frame<'_>, app: &App, area: Rec
 }
 
 fn render_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
-    if area.height < 15 {
-        let compact = Layout::default()
+    if area.width >= 72 {
+        if area.height < 14 {
+            render_compact_player(frame, app, area);
+            return;
+        }
+
+        if area.height < 20 {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(7),
+                    Constraint::Min(4),
+                    Constraint::Length(3),
+                ])
+                .split(area);
+
+            render_now_playing(
+                frame,
+                app.player(),
+                app.focus() == FocusPane::Player,
+                rows[0],
+            );
+            render_visualizer(frame, app.player(), rows[1]);
+            render_progress(frame, app.player(), rows[2]);
+            return;
+        }
+
+        if area.height < 26 {
+            let now_height: u16 = if area.height >= 22 { 8 } else { 7 };
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(now_height),
+                    Constraint::Min(4),
+                    Constraint::Length(3),
+                    Constraint::Length(6),
+                ])
+                .split(area);
+
+            render_now_playing(
+                frame,
+                app.player(),
+                app.focus() == FocusPane::Player,
+                rows[0],
+            );
+            render_visualizer(frame, app.player(), rows[1]);
+            render_progress(frame, app.player(), rows[2]);
+            render_queue(frame, app.player(), rows[3]);
+            return;
+        }
+
+        let now_height: u16 = if area.height >= 30 { 9 } else { 8 };
+        let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(7),
-                Constraint::Min(3),
+                Constraint::Length(now_height),
+                Constraint::Min(5),
                 Constraint::Length(3),
+                Constraint::Length(4),
+                Constraint::Length(6),
             ])
             .split(area);
 
@@ -430,33 +483,29 @@ fn render_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             frame,
             app.player(),
             app.focus() == FocusPane::Player,
-            compact[0],
+            rows[0],
         );
-        render_visualizer(frame, app.player(), compact[1]);
-        render_progress(frame, app.player(), compact[2]);
+        render_visualizer(frame, app.player(), rows[1]);
+        render_progress(frame, app.player(), rows[2]);
+        render_keys(frame, rows[3]);
+        render_queue(frame, app.player(), rows[4]);
         return;
     }
 
-    let constraints = if area.width < 72 {
-        [
+    if area.height < 15 {
+        render_compact_player(frame, app, area);
+        return;
+    }
+
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
             Constraint::Length(8),
             Constraint::Length(8),
             Constraint::Length(3),
             Constraint::Length(6),
             Constraint::Min(4),
-        ]
-    } else {
-        [
-            Constraint::Length(10),
-            Constraint::Length(10),
-            Constraint::Length(3),
-            Constraint::Length(7),
-            Constraint::Min(5),
-        ]
-    };
-    let right = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
+        ])
         .split(area);
 
     render_now_playing(
@@ -469,6 +518,26 @@ fn render_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     render_progress(frame, app.player(), right[2]);
     render_keys(frame, right[3]);
     render_queue(frame, app.player(), right[4]);
+}
+
+fn render_compact_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
+    let compact = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(7),
+            Constraint::Min(3),
+            Constraint::Length(3),
+        ])
+        .split(area);
+
+    render_now_playing(
+        frame,
+        app.player(),
+        app.focus() == FocusPane::Player,
+        compact[0],
+    );
+    render_visualizer(frame, app.player(), compact[1]);
+    render_progress(frame, app.player(), compact[2]);
 }
 
 fn render_now_playing(
@@ -495,17 +564,6 @@ fn render_now_playing(
         return;
     }
 
-    let track_name = player
-        .current_track
-        .as_ref()
-        .map(|track| track.title.clone())
-        .unwrap_or_else(|| String::from("Pick a track in the library lane and press Enter"));
-
-    let queue_text = match (player.queue_index, player.queue.is_empty()) {
-        (Some(index), false) => format!("{} / {}", index + 1, player.queue.len()),
-        _ => String::from("0 / 0"),
-    };
-
     if inner.height < 5 {
         let widget = Paragraph::new(compact_now_playing_lines(
             player,
@@ -530,72 +588,96 @@ fn render_now_playing(
         columns[1]
     };
 
+    let widget = Paragraph::new(now_playing_detail_lines(
+        player,
+        detail_area.width as usize,
+        detail_area.height as usize,
+    ))
+    .style(Style::default().bg(XP_SILVER))
+    .wrap(Wrap { trim: false });
+    frame.render_widget(widget, detail_area);
+}
+
+fn now_playing_detail_lines(
+    player: &PlayerState,
+    width: usize,
+    height: usize,
+) -> Vec<Line<'static>> {
+    let width = width.max(24);
+    let height = height.max(5);
+    let track_name = player
+        .current_track
+        .as_ref()
+        .map(|track| track.title.clone())
+        .unwrap_or_else(|| String::from("Pick a track in the library lane and press Enter"));
+    let queue_text = match (player.queue_index, player.queue.is_empty()) {
+        (Some(index), false) => format!("{} / {}", index + 1, player.queue.len()),
+        _ => String::from("0 / 0"),
+    };
+
     let status_chip = match player.status {
         PlaybackStatus::Playing => chip("PLAYING", XP_TEXT_DARK, XP_MINT),
         PlaybackStatus::Paused => chip("PAUSED", XP_TEXT_DARK, XP_HIGHLIGHT),
         PlaybackStatus::Stopped => chip("STOPPED", XP_TEXT_LIGHT, XP_BLUE_DEEP),
     };
-
     let hero_chip = match player.status {
         PlaybackStatus::Playing => chip("ON AIR", XP_TEXT_DARK, XP_HIGHLIGHT),
         PlaybackStatus::Paused => chip("HELD", XP_TEXT_DARK, XP_PANEL),
         PlaybackStatus::Stopped => chip("READY", XP_TEXT_LIGHT, XP_BLUE_DEEP),
     };
 
-    let mut detail_lines = vec![now_playing_header_line(player, detail_area.width as usize)];
-    detail_lines.push(Line::from(vec![
+    let mut lines = vec![now_playing_header_line(player, width)];
+    lines.push(Line::from(vec![
         hero_chip,
         Span::raw(" "),
         Span::styled(
-            animated_marquee(
-                player,
-                &track_name,
-                detail_area.width.saturating_sub(13).max(8) as usize,
-                4.0,
-            ),
+            animated_marquee(player, &track_name, width.saturating_sub(13).max(8), 4.0),
             Style::default()
                 .fg(XP_TEXT_DARK)
                 .add_modifier(Modifier::BOLD),
         ),
     ]));
 
-    if detail_area.height >= 8 {
-        detail_lines.push(deck_source_line(player, detail_area.width as usize));
+    if height >= 6 {
+        lines.push(deck_source_line(player, width));
     }
 
-    detail_lines.push(now_playing_context_line(player, detail_area.width as usize));
-    detail_lines.push(Line::from(vec![
+    lines.push(now_playing_context_line(player, width));
+    lines.push(Line::from(vec![
         status_chip,
         Span::raw(" "),
         chip(format!("QUEUE {queue_text}"), XP_TEXT_DARK, XP_PANEL),
         Span::raw(" "),
         chip(compact_time_label(player), XP_TEXT_LIGHT, XP_BLUE_MID),
     ]));
-    detail_lines.push(meter_line(
-        "volume",
-        player.volume as f64,
-        detail_area.width.saturating_sub(18) as usize,
-        XP_MINT,
-        XP_PANEL_DARK,
-    ));
 
-    if detail_area.height >= 9 {
-        detail_lines.push(meter_line(
+    if height >= 7 {
+        lines.push(meter_line(
+            "volume",
+            player.volume as f64,
+            width.saturating_sub(18),
+            XP_MINT,
+            XP_PANEL_DARK,
+        ));
+    }
+
+    if height >= 9 {
+        lines.push(meter_line(
             "drive",
             playback_energy(player),
-            detail_area.width.saturating_sub(17) as usize,
+            width.saturating_sub(17),
             XP_HIGHLIGHT,
             XP_PANEL_DARK,
         ));
     }
 
-    detail_lines.push(transport_line(player));
-    detail_lines.push(info_message_line(player, detail_area.width as usize));
+    lines.push(transport_line(player));
 
-    let widget = Paragraph::new(detail_lines)
-        .style(Style::default().bg(XP_SILVER))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(widget, detail_area);
+    if height >= 8 {
+        lines.push(info_message_line(player, width));
+    }
+
+    lines
 }
 
 fn render_album_tile(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
@@ -2398,9 +2480,14 @@ fn make_reflection_line(player: &PlayerState, width: usize) -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
+    use std::sync::mpsc;
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::backend::TestBackend;
+    use tempfile::tempdir;
 
     use super::*;
-    use crate::audio_engine::Track;
+    use crate::audio_engine::{EngineEvent, Track};
 
     fn sample_player() -> PlayerState {
         PlayerState {
@@ -2420,6 +2507,24 @@ mod tests {
             queue_index: Some(1),
             last_error: None,
         }
+    }
+
+    fn render_snapshot(width: u16, height: u16, app: &App) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                let mut line = String::new();
+                for x in 0..width {
+                    line.push_str(buffer[(x, y)].symbol());
+                }
+                line.trim_end().to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     #[test]
@@ -2624,6 +2729,26 @@ mod tests {
                 .iter()
                 .any(|span| span.content.contains("RATING"))
         );
+    }
+
+    #[test]
+    fn wide_short_layout_keeps_now_playing_header_visible() {
+        let temp = tempdir().unwrap();
+        let (command_tx, _command_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+        let mut app = App::new(temp.path().to_path_buf(), command_tx, event_rx).unwrap();
+
+        event_tx
+            .send(EngineEvent::StateUpdated(sample_player()))
+            .unwrap();
+        app.drain_engine_events();
+        app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+
+        let screen = render_snapshot(120, 20, &app);
+        assert!(screen.contains("Playback Deck"));
+        assert!(screen.contains("NOW PLAYING"));
+        assert!(screen.contains("Signal Deck"));
     }
 
     #[test]
