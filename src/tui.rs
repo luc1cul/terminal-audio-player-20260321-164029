@@ -443,15 +443,16 @@ fn render_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
             return;
         }
 
-        if area.height < 26 {
-            let now_height: u16 = if area.height >= 22 { 8 } else { 7 };
+        if let Some((now_height, visualizer_height, progress_height, queue_height)) =
+            wide_queue_reentry_layout(area.height)
+        {
             let rows = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Length(now_height),
-                    Constraint::Min(4),
-                    Constraint::Length(3),
-                    Constraint::Length(6),
+                    Constraint::Length(visualizer_height),
+                    Constraint::Length(progress_height),
+                    Constraint::Length(queue_height),
                 ])
                 .split(area);
 
@@ -518,6 +519,23 @@ fn render_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     render_progress(frame, app.player(), right[2]);
     render_keys(frame, right[3]);
     render_queue(frame, app.player(), right[4]);
+}
+
+fn wide_queue_reentry_layout(area_height: u16) -> Option<(u16, u16, u16, u16)> {
+    if !(20..26).contains(&area_height) {
+        return None;
+    }
+
+    let queue_height = match area_height {
+        20 | 21 => 4,
+        22..=24 => 5,
+        _ => 6,
+    };
+    let visualizer_height = 8;
+    let progress_height = 3;
+    let now_height = area_height - visualizer_height - progress_height - queue_height;
+
+    Some((now_height, visualizer_height, progress_height, queue_height))
 }
 
 fn render_compact_player(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
@@ -1059,7 +1077,7 @@ fn render_queue(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect
         vertical: 1,
         horizontal: 1,
     });
-    if inner.width < 20 || inner.height < 4 {
+    if inner.width < 20 || inner.height < 2 {
         return;
     }
 
@@ -1097,30 +1115,63 @@ fn render_queue(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect
         return;
     }
 
+    let summary = Paragraph::new(queue_summary_line(player)).style(Style::default().bg(XP_SILVER));
+    frame.render_widget(summary, Rect::new(inner.x, inner.y, inner.width, 1));
+
+    if inner.height == 2 {
+        let queue_widget = Paragraph::new(queue_lines(player, inner.width as usize, 1))
+            .style(Style::default().bg(XP_SILVER))
+            .wrap(Wrap { trim: false });
+        frame.render_widget(
+            queue_widget,
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        );
+        return;
+    }
+
+    if inner.height == 3 {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+
+        let queue_widget = Paragraph::new(queue_lines(player, rows[1].width as usize, 1))
+            .style(Style::default().bg(XP_SILVER))
+            .wrap(Wrap { trim: false });
+        frame.render_widget(queue_widget, rows[1]);
+
+        let footer = Paragraph::new(queue_footer_line(player, rows[2].width as usize))
+            .style(Style::default().bg(XP_SILVER));
+        frame.render_widget(footer, rows[2]);
+        return;
+    }
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
-            Constraint::Min(2),
+            Constraint::Length(1),
+            Constraint::Length(1),
             Constraint::Length(1),
         ])
         .split(inner);
 
-    let summary = Paragraph::new(queue_summary_line(player)).style(Style::default().bg(XP_SILVER));
-    frame.render_widget(summary, rows[0]);
-
-    let queue_widget = Paragraph::new(queue_lines(
-        player,
-        rows[1].width as usize,
-        rows[1].height as usize,
-    ))
-    .style(Style::default().bg(XP_SILVER))
-    .wrap(Wrap { trim: false });
-    frame.render_widget(queue_widget, rows[1]);
-
-    let footer = Paragraph::new(queue_footer_line(player, rows[2].width as usize))
+    let marquee = Paragraph::new(queue_marquee_line(player, rows[1].width as usize))
         .style(Style::default().bg(XP_SILVER));
-    frame.render_widget(footer, rows[2]);
+    frame.render_widget(marquee, rows[1]);
+
+    let queue_widget = Paragraph::new(queue_lines(player, rows[2].width as usize, 1))
+        .style(Style::default().bg(XP_SILVER))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(queue_widget, rows[2]);
+
+    let footer = Paragraph::new(queue_footer_line(player, rows[3].width as usize))
+        .style(Style::default().bg(XP_SILVER));
+    frame.render_widget(footer, rows[3]);
 }
 
 fn render_status_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
@@ -3046,6 +3097,28 @@ mod tests {
     fn wide_midheight_signal_deck_uses_level_rail_bridge() {
         let screen = render_player_focus_snapshot(120, 24);
         assert!(screen.contains("LEVEL RAIL"));
+        assert!(!screen.contains("Signal Ladder"));
+    }
+
+    #[test]
+    fn wide_queue_reentry_layout_preserves_the_bridge_band() {
+        assert_eq!(wide_queue_reentry_layout(19), None);
+        assert_eq!(wide_queue_reentry_layout(20), Some((5, 8, 3, 4)));
+        assert_eq!(wide_queue_reentry_layout(21), Some((6, 8, 3, 4)));
+        assert_eq!(wide_queue_reentry_layout(22), Some((6, 8, 3, 5)));
+        assert_eq!(wide_queue_reentry_layout(23), Some((7, 8, 3, 5)));
+        assert_eq!(wide_queue_reentry_layout(24), Some((8, 8, 3, 5)));
+        assert_eq!(wide_queue_reentry_layout(25), Some((8, 8, 3, 6)));
+        assert_eq!(wide_queue_reentry_layout(26), None);
+    }
+
+    #[test]
+    fn wide_queue_reentry_keeps_level_rail_when_cue_stack_returns() {
+        let screen = render_player_focus_snapshot(120, 26);
+        assert!(screen.contains("Cue Stack"));
+        assert!(screen.contains("LEVEL RAIL"));
+        assert!(screen.contains("STACK 2/3"));
+        assert!(screen.contains("AIR   2."));
         assert!(!screen.contains("Signal Ladder"));
     }
 
