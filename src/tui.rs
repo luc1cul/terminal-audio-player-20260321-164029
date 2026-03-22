@@ -558,7 +558,7 @@ fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
         horizontal: 1,
     });
 
-    if inner.width < 12 || inner.height < 2 {
+    if inner.width < 12 || inner.height < 1 {
         return;
     }
     if inner.height < 6 {
