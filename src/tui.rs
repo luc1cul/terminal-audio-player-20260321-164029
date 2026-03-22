@@ -636,21 +636,38 @@ fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
 }
 
 fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(4),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(1),
-        ])
-        .split(area);
+    let lush = area.height >= 9;
+    let rows = if lush {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Length(3),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+            ])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Length(4),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+            ])
+            .split(area)
+    };
 
     let legend = Paragraph::new(Line::from(vec![
         chip("SPECTRUM", XP_TEXT_DARK, XP_HIGHLIGHT),
         Span::raw(" "),
         chip("WAVE", XP_TEXT_LIGHT, XP_BLUE_MID),
+        Span::raw(" "),
+        chip("REFLECT", XP_TEXT_DARK, XP_PANEL),
         Span::raw(" "),
         chip("GLOW", XP_TEXT_DARK, XP_MINT),
     ]))
@@ -669,16 +686,28 @@ fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, 
         .style(Style::default().bg(XP_BLUE_DEEP));
     frame.render_widget(wave, rows[2]);
 
-    let glow = Paragraph::new(make_glow_line(player, rows[3].width as usize))
+    let reflection_row = if lush {
+        let reflection = Paragraph::new(make_reflection_line(player, rows[3].width as usize))
+            .style(Style::default().bg(XP_BLUE_DEEP));
+        frame.render_widget(reflection, rows[3]);
+        4
+    } else {
+        3
+    };
+
+    let glow = Paragraph::new(make_glow_line(player, rows[reflection_row].width as usize))
         .style(Style::default().bg(XP_BLUE_DEEP));
-    frame.render_widget(glow, rows[3]);
+    frame.render_widget(glow, rows[reflection_row]);
 
     let caption = Paragraph::new(Line::from(vec![Span::styled(
-        fit_text(&visualizer_caption(player), rows[4].width as usize),
+        fit_text(
+            &visualizer_caption(player),
+            rows[reflection_row + 1].width as usize,
+        ),
         Style::default().fg(XP_SILVER),
     )]))
     .style(Style::default().bg(XP_BLUE_DEEP));
-    frame.render_widget(caption, rows[4]);
+    frame.render_widget(caption, rows[reflection_row + 1]);
 }
 
 fn render_signal_ladder(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
@@ -1588,14 +1617,14 @@ fn playback_mood(player: &PlayerState) -> &'static str {
 
 fn visualizer_caption(player: &PlayerState) -> String {
     match player.status {
-        PlaybackStatus::Playing => {
-            String::from("Time-driven spectrum is keyed to track, volume, and playback position.")
-        }
-        PlaybackStatus::Paused => {
-            String::from("Spectrum is frozen at the current playback posture.")
-        }
+        PlaybackStatus::Playing => String::from(
+            "Time-driven crest, reflection, and glow are keyed to track, volume, and playback position.",
+        ),
+        PlaybackStatus::Paused => String::from(
+            "The wave tank holds its crest and reflection at the current playback posture.",
+        ),
         PlaybackStatus::Stopped => {
-            String::from("Idle deck shimmer — select a track to light the tank.")
+            String::from("Idle deck shimmer — select a track to wake the crest and reflection.")
         }
     }
 }
@@ -2088,16 +2117,57 @@ fn make_glow_line(player: &PlayerState, width: usize) -> Line<'static> {
     let mut spans = Vec::with_capacity(width);
     for index in 0..width {
         let distance = index.abs_diff(phase);
+        let shimmer = ((index as f64 * 0.45) + player.position.as_secs_f64() * 3.1).sin();
         let (ch, color) = if distance == 0 {
             ('◉', XP_HIGHLIGHT)
         } else if distance <= 2 {
             ('•', XP_SILVER)
         } else if distance <= 5 {
             ('·', XP_PANEL_DARK)
+        } else if shimmer > 0.72 {
+            ('·', XP_GLASS)
         } else {
             ('·', XP_BLUE_MID)
         };
         spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
+    }
+
+    Line::from(spans)
+}
+
+fn make_reflection_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let width = width.max(12);
+    let seed = track_seed(player) as f64 * 0.017;
+    let energy = playback_energy(player);
+    let progress = progress_info(player).0;
+    let phase = match player.status {
+        PlaybackStatus::Stopped => seed * 0.15,
+        PlaybackStatus::Paused => player.position.as_secs_f64() * 1.6 + seed,
+        PlaybackStatus::Playing => player.position.as_secs_f64() * (3.4 + progress * 1.2) + seed,
+    };
+
+    let chars = [' ', '.', '·', '▪', '▫', '◦', '•'];
+    let mut spans = Vec::with_capacity(width);
+    for index in 0..width {
+        let x = index as f64 / width as f64;
+        let ripple = (x * 9.0 + phase).sin() * 0.42
+            + (x * 18.0 - phase * 0.55).cos() * 0.25
+            + (x * 31.0 + seed * 0.8).sin() * 0.11;
+        let normalized = (((ripple * energy * 0.9) + 1.0) / 2.0).clamp(0.0, 1.0);
+        let char_index = (normalized * (chars.len() - 1) as f64).round() as usize;
+        let color = if normalized > 0.78 {
+            XP_SILVER
+        } else if normalized > 0.56 {
+            XP_GLASS
+        } else if normalized > 0.34 {
+            XP_SKY
+        } else {
+            XP_PANEL_DARK
+        };
+        spans.push(Span::styled(
+            chars[char_index].to_string(),
+            Style::default().fg(color),
+        ));
     }
 
     Line::from(spans)
@@ -2169,6 +2239,12 @@ mod tests {
         let lines = make_spectrum_lines(&sample_player(), 18, 4);
         assert_eq!(lines.len(), 4);
         assert!(lines.iter().all(|line| line.spans.len() == 18));
+    }
+
+    #[test]
+    fn reflection_line_enforces_minimum_width() {
+        let line = make_reflection_line(&sample_player(), 4);
+        assert_eq!(line.spans.len(), 12);
     }
 
     #[test]
