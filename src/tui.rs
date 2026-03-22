@@ -87,12 +87,13 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &App) {
         horizontal: 1,
     });
 
+    let chrome_height = if content.height < 26 { 2 } else { 3 };
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(chrome_height),
             Constraint::Min(12),
-            Constraint::Length(3),
+            Constraint::Length(chrome_height),
         ])
         .split(content);
 
@@ -147,6 +148,12 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
     ]);
+
+    if area.height < 3 {
+        let widget = Paragraph::new(text).style(Style::default().bg(XP_BLUE));
+        frame.render_widget(widget, area);
+        return;
+    }
 
     let widget = Paragraph::new(text).block(
         Block::default()
