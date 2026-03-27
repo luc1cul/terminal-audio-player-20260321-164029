@@ -35,6 +35,7 @@ const XP_TEXT_DARK: Color = Color::Rgb(8, 32, 86);
 const XP_TEXT_LIGHT: Color = Color::Rgb(247, 251, 255);
 const XP_MINT: Color = Color::Rgb(119, 247, 208);
 const XP_RED: Color = Color::Rgb(188, 61, 61);
+const VISUALIZER_PRESETS: [&str; 4] = ["Bars", "Ocean Mist", "Fire Storm", "Scope"];
 
 pub fn run(app: &mut App) -> anyhow::Result<()> {
     enable_raw_mode()?;
@@ -125,16 +126,9 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     } else {
         "  XP blue glass • media deck • wave tank  "
     };
-    let focus_chip = if area.width < 84 {
-        match app.focus() {
-            FocusPane::Browser => chip("LIB", XP_TEXT_DARK, XP_HIGHLIGHT),
-            FocusPane::Player => chip("DECK", XP_TEXT_LIGHT, XP_BLUE_MID),
-        }
-    } else {
-        match app.focus() {
-            FocusPane::Browser => chip("LIBRARY LANE", XP_TEXT_DARK, XP_HIGHLIGHT),
-            FocusPane::Player => chip("PLAYBACK DECK", XP_TEXT_LIGHT, XP_BLUE_MID),
-        }
+    let compact_tab = match app.focus() {
+        FocusPane::Browser => nav_tab("LIBRARY", true),
+        FocusPane::Player => nav_tab("NOW PLAYING", true),
     };
     let stack_chip = match (app.player().queue_index, app.player().queue.is_empty()) {
         (Some(index), false) => chip(
@@ -176,10 +170,18 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(mood, Style::default().fg(XP_TEXT_LIGHT).bg(XP_BLUE)),
-        focus_chip,
-        Span::raw(" "),
-        state_chip,
     ];
+
+    if area.width >= 94 {
+        spans.push(nav_tab("NOW PLAYING", app.focus() == FocusPane::Player));
+        spans.push(Span::raw(" "));
+        spans.push(nav_tab("MEDIA LIBRARY", app.focus() == FocusPane::Browser));
+    } else {
+        spans.push(compact_tab);
+    }
+
+    spans.push(Span::raw(" "));
+    spans.push(state_chip);
 
     if area.width >= 112 {
         spans.push(Span::raw(" "));
@@ -194,13 +196,39 @@ fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
         return;
     }
 
-    let widget = Paragraph::new(text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(XP_BLUE_DEEP))
-            .style(Style::default().bg(XP_BLUE)),
-    );
-    frame.render_widget(widget, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(XP_BLUE_DEEP))
+        .style(Style::default().bg(XP_BLUE));
+    frame.render_widget(block, area);
+
+    let inner = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    if inner.width < 16 {
+        return;
+    }
+
+    if inner.width < 72 {
+        let widget = Paragraph::new(text).style(Style::default().bg(XP_BLUE));
+        frame.render_widget(widget, inner);
+        return;
+    }
+
+    let control_width = if inner.width >= 120 { 15 } else { 13 };
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(12), Constraint::Length(control_width)])
+        .split(inner);
+
+    let title = Paragraph::new(text).style(Style::default().bg(XP_BLUE));
+    frame.render_widget(title, columns[0]);
+
+    let controls = Paragraph::new(window_controls_line(columns[1].width as usize))
+        .alignment(Alignment::Right)
+        .style(Style::default().bg(XP_BLUE));
+    frame.render_widget(controls, columns[1]);
 }
 
 fn title_state_text(status: &PlaybackStatus) -> &'static str {
@@ -209,6 +237,33 @@ fn title_state_text(status: &PlaybackStatus) -> &'static str {
         PlaybackStatus::Paused => "HELD",
         PlaybackStatus::Stopped => "READY",
     }
+}
+
+fn nav_tab(label: &str, active: bool) -> Span<'static> {
+    let (fg, bg) = if active {
+        (XP_TEXT_DARK, XP_SILVER)
+    } else {
+        (XP_TEXT_LIGHT, XP_BLUE_MID)
+    };
+
+    Span::styled(
+        format!(" {label} "),
+        Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
+    )
+}
+
+fn window_controls_line(width: usize) -> Line<'static> {
+    if width < 11 {
+        return Line::from(vec![chip("×", XP_TEXT_LIGHT, XP_RED)]);
+    }
+
+    Line::from(vec![
+        chip("–", XP_TEXT_DARK, XP_PANEL),
+        Span::raw(" "),
+        chip("□", XP_TEXT_DARK, XP_PANEL),
+        Span::raw(" "),
+        chip("×", XP_TEXT_LIGHT, XP_RED),
+    ])
 }
 
 fn render_browser(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
@@ -1066,13 +1121,10 @@ fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, 
         .style(Style::default().bg(XP_BLUE_DEEP));
     frame.render_widget(glow, rows[glow_row]);
 
-    let caption = Paragraph::new(Line::from(vec![Span::styled(
-        fit_text(
-            &visualizer_caption(player),
-            rows[caption_row].width as usize,
-        ),
-        Style::default().fg(XP_SILVER),
-    )]))
+    let caption = Paragraph::new(visualizer_footer_line(
+        player,
+        rows[caption_row].width as usize,
+    ))
     .style(Style::default().bg(XP_BLUE_DEEP));
     frame.render_widget(caption, rows[caption_row]);
 }
@@ -1779,16 +1831,16 @@ fn visualizer_collection() -> &'static str {
     "BARS + WAVES"
 }
 
-fn visualizer_preset(player: &PlayerState) -> &'static str {
-    const PRESETS: [&str; 4] = ["Bars", "Ocean Mist", "Fire Storm", "Scope"];
-
-    let index = if player.current_track.is_some() {
-        track_seed(player) as usize % PRESETS.len()
+fn visualizer_preset_index(player: &PlayerState) -> usize {
+    if player.current_track.is_some() {
+        track_seed(player) as usize % VISUALIZER_PRESETS.len()
     } else {
         1
-    };
+    }
+}
 
-    PRESETS[index]
+fn visualizer_preset(player: &PlayerState) -> &'static str {
+    VISUALIZER_PRESETS[visualizer_preset_index(player)]
 }
 
 fn deck_rating(player: &PlayerState) -> usize {
@@ -1941,6 +1993,70 @@ fn compact_visualizer_lines(
             lines
         }
     }
+}
+
+fn span_text_width(spans: &[Span<'_>]) -> usize {
+    spans.iter().map(|span| span.content.chars().count()).sum()
+}
+
+fn visualizer_footer_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let width = width.max(12);
+
+    if width < 26 {
+        return Line::from(vec![Span::styled(
+            fit_text(&compact_visualizer_caption_text(player), width),
+            Style::default().fg(XP_SILVER),
+        )]);
+    }
+
+    if width < 46 {
+        return Line::from(vec![
+            chip("◄", XP_TEXT_DARK, XP_PANEL),
+            Span::raw(" "),
+            chip(
+                fit_text(visualizer_preset(player), width.saturating_sub(12).max(6)),
+                XP_TEXT_DARK,
+                XP_HIGHLIGHT,
+            ),
+            Span::raw(" "),
+            chip("►", XP_TEXT_DARK, XP_PANEL),
+        ]);
+    }
+
+    let mut spans = vec![
+        chip("◄", XP_TEXT_DARK, XP_PANEL),
+        Span::raw(" "),
+        chip(
+            format!(
+                "VIS {:02}/{:02}",
+                visualizer_preset_index(player) + 1,
+                VISUALIZER_PRESETS.len()
+            ),
+            XP_TEXT_DARK,
+            XP_GLASS,
+        ),
+        Span::raw(" "),
+        chip(visualizer_preset(player), XP_TEXT_DARK, XP_HIGHLIGHT),
+        Span::raw(" "),
+        chip("►", XP_TEXT_DARK, XP_PANEL),
+    ];
+
+    if width >= 58 {
+        spans.push(Span::raw(" "));
+        spans.push(visualizer_state_chip(player));
+    }
+
+    let used_width = span_text_width(&spans);
+    let remaining = width.saturating_sub(used_width + 1);
+    if remaining >= 12 {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            fit_text(&compact_visualizer_caption_text(player), remaining),
+            Style::default().fg(XP_SILVER),
+        ));
+    }
+
+    Line::from(spans)
 }
 
 fn visualizer_header_line(player: &PlayerState, width: usize) -> Line<'static> {
@@ -3027,6 +3143,19 @@ mod tests {
     }
 
     #[test]
+    fn tall_wide_title_bar_surfaces_mode_tabs_and_window_controls() {
+        let temp = tempdir().unwrap();
+        let (command_tx, _command_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let app = App::new(temp.path().to_path_buf(), command_tx, event_rx).unwrap();
+
+        let screen = render_snapshot(120, 30, &app);
+        assert!(screen.contains("NOW PLAYING"));
+        assert!(screen.contains("MEDIA LIBRARY"));
+        assert!(screen.contains("×"));
+    }
+
+    #[test]
     fn spectrum_lines_match_requested_geometry() {
         let lines = make_spectrum_lines(&sample_player(), 18, 4);
         assert_eq!(lines.len(), 4);
@@ -3386,6 +3515,21 @@ mod tests {
                 .iter()
                 .any(|span| span.content.contains("REFLECT + GLOW"))
         );
+    }
+
+    #[test]
+    fn visualizer_footer_line_adds_preset_controls_and_caption() {
+        let line = visualizer_footer_line(&sample_player(), 90);
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(text.contains("◄"));
+        assert!(text.contains("VIS"));
+        assert!(text.contains(visualizer_preset(&sample_player())));
+        assert!(text.contains("crest / mirror / glow"));
     }
 
     #[test]
