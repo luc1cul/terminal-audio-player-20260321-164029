@@ -796,7 +796,7 @@ fn now_playing_detail_lines(
         ));
     }
 
-    lines.push(transport_line(player));
+    lines.push(transport_line(player, width));
 
     if height >= 8 {
         lines.push(info_message_line(player, width));
@@ -2695,7 +2695,8 @@ fn meter_line(
     Line::from(spans)
 }
 
-fn transport_line(player: &PlayerState) -> Line<'static> {
+fn transport_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let width = width.max(24);
     let center_label = match player.status {
         PlaybackStatus::Playing => "PAUSE",
         PlaybackStatus::Paused | PlaybackStatus::Stopped => "PLAY",
@@ -2704,22 +2705,38 @@ fn transport_line(player: &PlayerState) -> Line<'static> {
         PlaybackStatus::Playing => XP_HIGHLIGHT,
         PlaybackStatus::Paused | PlaybackStatus::Stopped => XP_MINT,
     };
+    let time_chip = chip(compact_time_label(player), XP_TEXT_LIGHT, XP_BLUE_DEEP);
+
+    if width >= 58 {
+        return Line::from(vec![
+            chip("PREV", XP_TEXT_DARK, XP_PANEL),
+            Span::raw(" "),
+            chip(center_label, XP_TEXT_DARK, center_bg),
+            Span::raw(" "),
+            chip("STOP", XP_TEXT_LIGHT, XP_BLUE_DEEP),
+            Span::raw(" "),
+            chip("NEXT", XP_TEXT_DARK, XP_PANEL),
+            Span::raw(" "),
+            time_chip,
+        ]);
+    }
+
+    if width >= 40 {
+        return Line::from(vec![
+            chip("PREV", XP_TEXT_DARK, XP_PANEL),
+            Span::raw(" "),
+            chip(center_label, XP_TEXT_DARK, center_bg),
+            Span::raw(" "),
+            chip("NEXT", XP_TEXT_DARK, XP_PANEL),
+            Span::raw(" "),
+            time_chip,
+        ]);
+    }
 
     Line::from(vec![
-        chip("◄◄", XP_TEXT_DARK, XP_PANEL),
-        Span::raw(" "),
         chip(center_label, XP_TEXT_DARK, center_bg),
         Span::raw(" "),
-        chip("►►", XP_TEXT_DARK, XP_PANEL),
-        Span::raw(" "),
-        chip(
-            player
-                .duration
-                .map(format_duration)
-                .unwrap_or_else(|| String::from("--:--")),
-            XP_TEXT_LIGHT,
-            XP_BLUE_DEEP,
-        ),
+        time_chip,
     ])
 }
 
@@ -3599,6 +3616,21 @@ mod tests {
             status_transport_text(&player),
             "Stack loaded · 3 tracks waiting in the deck"
         );
+    }
+
+    #[test]
+    fn transport_line_expands_into_a_transport_cluster_when_space_allows() {
+        let line = transport_line(&sample_player(), 80);
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(text.contains("PREV"));
+        assert!(text.contains("NEXT"));
+        assert!(text.contains("STOP"));
+        assert!(text.contains("01:13 / 03:32"));
     }
 
     #[test]
