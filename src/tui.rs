@@ -120,11 +120,11 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &App) {
 
 fn render_title_bar(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     let mood = if area.width < 72 {
-        "  XP deck  "
+        "  blue-glass deck  "
     } else if area.width < 96 {
-        "  XP blue glass  "
+        "  blue-glass signal deck  "
     } else {
-        "  XP blue glass • media deck • wave tank  "
+        "  blue-glass signal deck • cue stack shimmer  "
     };
     let compact_tab = match app.focus() {
         FocusPane::Browser => nav_tab("LIBRARY", true),
@@ -2383,20 +2383,20 @@ fn help_lines(width: usize, rows: usize) -> Vec<Line<'static>> {
             "FLOW",
             XP_TEXT_DARK,
             XP_PANEL,
-            "Enter cue/play · Space pause · j/k move/vol · Tab lane↔deck",
+            "Enter cue/play · Tab lane↔deck · Space play/pause · j/k browse/vol",
         )],
         2 => vec![
             (
                 "TRANSPORT",
                 XP_TEXT_DARK,
                 XP_HIGHLIGHT,
-                "Space play/pause · s stop · n/p queue step",
+                "Space play/pause · s stop deck · n/p step stack",
             ),
             (
                 "FLOW",
                 XP_TEXT_DARK,
                 XP_PANEL,
-                "Enter cue/play · j/k browse/vol · h/l seek · Tab lane↔deck",
+                "Enter cue/play · Tab lane↔deck · j/k browse/vol · h/l seek ribbon",
             ),
         ],
         3 => vec![
@@ -2404,19 +2404,19 @@ fn help_lines(width: usize, rows: usize) -> Vec<Line<'static>> {
                 "TRANSPORT",
                 XP_TEXT_DARK,
                 XP_HIGHLIGHT,
-                "Space play/pause · s stop · n/p queue step",
+                "Space play/pause · s stop deck · n/p step stack",
             ),
             (
                 "BROWSER",
                 XP_TEXT_LIGHT,
                 XP_BLUE_DEEP,
-                "j/k move · Enter open/play · ←/→ fold folders",
+                "j/k move tree · Enter open/play · ←/→ fold folders",
             ),
             (
                 "DECK",
                 XP_TEXT_DARK,
                 XP_MINT,
-                "j/k volume · +/- trim · h/l seek · Tab lane↔deck",
+                "Tab lane↔deck · j/k volume · +/- trim glass · h/l seek ribbon",
             ),
         ],
         _ => vec![
@@ -2424,13 +2424,13 @@ fn help_lines(width: usize, rows: usize) -> Vec<Line<'static>> {
                 "TRANSPORT",
                 XP_TEXT_DARK,
                 XP_HIGHLIGHT,
-                "Space play/pause · s stop · n/p queue step",
+                "Space play/pause · s stop deck · n/p step stack",
             ),
             (
                 "BROWSER",
                 XP_TEXT_LIGHT,
                 XP_BLUE_DEEP,
-                "j/k move · Enter open/play · ←/→ fold folders",
+                "j/k move tree · Enter open/play · ←/→ fold folders",
             ),
             (
                 "DECK",
@@ -2442,7 +2442,7 @@ fn help_lines(width: usize, rows: usize) -> Vec<Line<'static>> {
                 "FOCUS",
                 XP_TEXT_DARK,
                 XP_PANEL,
-                "Tab swaps lane/deck focus · q quits the player",
+                "Tab lane↔deck focus · q exits the deck",
             ),
         ],
     };
@@ -2476,23 +2476,23 @@ fn format_duration(duration: Duration) -> String {
 
 fn playback_mood(player: &PlayerState) -> &'static str {
     match player.status {
-        PlaybackStatus::Playing => "blue-glass screen in motion",
-        PlaybackStatus::Paused => "held on the last shimmer frame",
-        PlaybackStatus::Stopped => "sleeping in now playing mode",
+        PlaybackStatus::Playing => "crest rolling under blue glass",
+        PlaybackStatus::Paused => "last crest held under blue glass",
+        PlaybackStatus::Stopped => "blue glass waiting on a cue",
     }
 }
 
 fn visualizer_caption(player: &PlayerState) -> String {
     let preset = visualizer_preset(player);
     match player.status {
-        PlaybackStatus::Playing => format!(
-            "{preset} throws a blocky crest, mirrored wash, and blue-glass glow across the deck."
-        ),
+        PlaybackStatus::Playing => {
+            format!("{preset} throws crest / mirror / blue-glass glow across the signal deck.")
+        }
         PlaybackStatus::Paused => {
-            format!("{preset} freezes the crest and mirrored wash at the held playback frame.")
+            format!("{preset} holds crest / mirror / blue-glass glow on the last frame.")
         }
         PlaybackStatus::Stopped => format!(
-            "{preset} is armed in {} — queue a track to light the glass.",
+            "{preset} waits in {} — queue a track to wake the blue-glass glow.",
             visualizer_collection()
         ),
     }
