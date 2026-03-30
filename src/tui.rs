@@ -1053,8 +1053,8 @@ fn signal_rise_footer_text(player: &PlayerState) -> &'static str {
 }
 
 fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
-    let lush = area.height >= 10;
-    let deluxe = area.height >= 8;
+    let lush = area.height >= 9;
+    let deluxe = area.height >= 7;
     let rows = if lush {
         Layout::default()
             .direction(Direction::Vertical)
@@ -1085,7 +1085,7 @@ fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, 
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1),
-                Constraint::Length(4),
+                Constraint::Length(2),
                 Constraint::Length(1),
                 Constraint::Length(1),
                 Constraint::Min(1),
@@ -1926,10 +1926,16 @@ fn compact_visualizer_header_line(player: &PlayerState, width: usize) -> Line<'s
 fn compact_visualizer_caption_text(player: &PlayerState) -> String {
     match player.status {
         PlaybackStatus::Playing => {
-            format!("crest / mirror / glow · {}", compact_time_label(player))
+            format!(
+                "crest / undertow / mirror / glow · {}",
+                compact_time_label(player)
+            )
         }
         PlaybackStatus::Paused => {
-            format!("held crest / frozen wash · {}", compact_time_label(player))
+            format!(
+                "held crest / undertow / mirror · {}",
+                compact_time_label(player)
+            )
         }
         PlaybackStatus::Stopped => String::from("idle glass / queue a track"),
     }
@@ -1992,11 +1998,14 @@ fn compact_visualizer_lines(
             compact_visualizer_caption_line(player, width),
         ],
         _ => {
-            let spectrum_rows = height.saturating_sub(4).max(2);
+            let include_glow = height >= 7;
+            let effect_rows = if include_glow { 3 } else { 2 };
+            let spectrum_rows = height.saturating_sub(2 + effect_rows).max(1);
             let mut lines = vec![compact_visualizer_header_line(player, width)];
             lines.extend(make_spectrum_lines(player, width, spectrum_rows));
             lines.push(make_wave_line(player, width));
-            if height >= 6 {
+            lines.push(make_wave_undertow_line(player, width));
+            if include_glow {
                 lines.push(make_glow_line(player, width));
             }
             lines.push(compact_visualizer_caption_line(player, width));
@@ -2486,8 +2495,8 @@ fn format_duration(duration: Duration) -> String {
 
 fn playback_mood(player: &PlayerState) -> &'static str {
     match player.status {
-        PlaybackStatus::Playing => "crest rolling under blue glass",
-        PlaybackStatus::Paused => "last crest held under blue glass",
+        PlaybackStatus::Playing => "crest and undertow rolling under blue glass",
+        PlaybackStatus::Paused => "last crest and undertow held under blue glass",
         PlaybackStatus::Stopped => "blue glass waiting on a cue",
     }
 }
@@ -2496,13 +2505,15 @@ fn visualizer_caption(player: &PlayerState) -> String {
     let preset = visualizer_preset(player);
     match player.status {
         PlaybackStatus::Playing => {
-            format!("{preset} throws crest / mirror / blue-glass glow across the signal deck.")
+            format!(
+                "{preset} throws crest / undertow / mirror / blue-glass glow across the signal deck."
+            )
         }
         PlaybackStatus::Paused => {
-            format!("{preset} holds crest / mirror / blue-glass glow on the last frame.")
+            format!("{preset} holds crest / undertow / mirror / blue-glass glow on the last frame.")
         }
         PlaybackStatus::Stopped => format!(
-            "{preset} waits in {} — queue a track to wake the blue-glass glow.",
+            "{preset} waits in {} — queue a track to wake the blue-glass undertow and glow.",
             visualizer_collection()
         ),
     }
@@ -3445,7 +3456,7 @@ mod tests {
             lines[2]
                 .spans
                 .iter()
-                .any(|span| span.content.contains("crest / mirror / glow"))
+                .any(|span| span.content.contains("crest / undertow / mirror / glow"))
         );
     }
 
@@ -3501,7 +3512,7 @@ mod tests {
 
         let screen = render_snapshot(120, 20, &app);
         assert!(screen.contains("WASH"));
-        assert!(screen.contains("crest / mirror / glow"));
+        assert!(screen.contains("undertow"));
     }
 
     #[test]
@@ -3603,13 +3614,14 @@ mod tests {
         assert!(text.contains("◄"));
         assert!(text.contains("VIS"));
         assert!(text.contains(visualizer_preset(&sample_player())));
-        assert!(text.contains("crest / mirror / glow"));
+        assert!(text.contains("crest / undertow / mirror / glow"));
     }
 
     #[test]
     fn visualizer_caption_references_selected_preset() {
         let caption = visualizer_caption(&sample_player());
         assert!(caption.contains(visualizer_preset(&sample_player())));
+        assert!(caption.contains("undertow"));
         assert!(caption.contains("blue-glass glow"));
     }
 
