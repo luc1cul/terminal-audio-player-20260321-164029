@@ -1064,6 +1064,7 @@ fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, 
                 Constraint::Length(1),
                 Constraint::Length(1),
                 Constraint::Length(1),
+                Constraint::Length(1),
                 Constraint::Min(1),
             ])
             .split(area)
@@ -1108,10 +1109,19 @@ fn render_visualizer_deck(frame: &mut ratatui::Frame<'_>, player: &PlayerState, 
         .style(Style::default().bg(XP_BLUE_DEEP));
     frame.render_widget(wave, rows[2]);
 
-    let (glow_row, caption_row) = if deluxe {
-        let reflection = Paragraph::new(make_reflection_line(player, rows[3].width as usize))
+    let (glow_row, caption_row) = if lush {
+        let undertow = Paragraph::new(make_wave_undertow_line(player, rows[3].width as usize))
             .style(Style::default().bg(XP_BLUE_DEEP));
-        frame.render_widget(reflection, rows[3]);
+        frame.render_widget(undertow, rows[3]);
+
+        let reflection = Paragraph::new(make_reflection_line(player, rows[4].width as usize))
+            .style(Style::default().bg(XP_BLUE_DEEP));
+        frame.render_widget(reflection, rows[4]);
+        (5, 6)
+    } else if deluxe {
+        let undertow = Paragraph::new(make_wave_undertow_line(player, rows[3].width as usize))
+            .style(Style::default().bg(XP_BLUE_DEEP));
+        frame.render_widget(undertow, rows[3]);
         (4, 5)
     } else {
         (3, 4)
@@ -2991,6 +3001,47 @@ fn make_wave_line(player: &PlayerState, width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
+fn make_wave_undertow_line(player: &PlayerState, width: usize) -> Line<'static> {
+    let width = width.max(12);
+    let seed = track_seed(player) as f64 * 0.009;
+    let energy = playback_energy(player) * 0.88;
+    let progress = progress_info(player).0;
+    let phase = match player.status {
+        PlaybackStatus::Stopped => seed * 0.4,
+        PlaybackStatus::Paused => player.position.as_secs_f64() * 1.8 + seed * 0.4,
+        PlaybackStatus::Playing => player.position.as_secs_f64() * (4.1 + progress * 1.4) + seed,
+    };
+
+    let chars = ['·', '▪', '▫', '▁', '▂', '▃', '▄'];
+    let mut spans = Vec::with_capacity(width);
+
+    for index in 0..width {
+        let x = index as f64 / width as f64;
+        let swell = (x * 8.0 + phase * 0.92 + seed * 0.6).sin() * 0.46;
+        let undertow = (x * 18.0 - phase * 0.48 + seed).cos() * 0.24;
+        let drift = (progress * 5.0 + x * 2.4 + seed * 0.3).sin() * 0.18;
+        let bass_bias = (1.0 - x.powf(0.72)) * 0.1;
+        let normalized = ((((swell + undertow + drift) * energy) + bass_bias) + 1.0) / 2.0;
+        let normalized = normalized.clamp(0.0, 1.0);
+        let char_index = (normalized * (chars.len() - 1) as f64).round() as usize;
+        let color = if normalized > 0.78 {
+            XP_SILVER
+        } else if normalized > 0.54 {
+            XP_GLASS
+        } else if normalized > 0.32 {
+            XP_SKY
+        } else {
+            XP_PANEL_DARK
+        };
+        spans.push(Span::styled(
+            chars[char_index].to_string(),
+            Style::default().fg(color),
+        ));
+    }
+
+    Line::from(spans)
+}
+
 fn make_glow_line(player: &PlayerState, width: usize) -> Line<'static> {
     let width = width.max(12);
     let (progress, _) = progress_info(player);
@@ -3188,6 +3239,12 @@ mod tests {
     #[test]
     fn wave_line_enforces_minimum_width() {
         let line = make_wave_line(&sample_player(), 4);
+        assert_eq!(line.spans.len(), 12);
+    }
+
+    #[test]
+    fn wave_undertow_line_enforces_minimum_width() {
+        let line = make_wave_undertow_line(&sample_player(), 4);
         assert_eq!(line.spans.len(), 12);
     }
 
