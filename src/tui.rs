@@ -3016,7 +3016,7 @@ fn make_spectrum_lines(player: &PlayerState, width: usize, rows: usize) -> Vec<L
         PlaybackStatus::Playing => player.position.as_secs_f64() * (3.6 + progress * 2.2),
     };
 
-    let heights = (0..width)
+    let raw_heights = (0..width)
         .map(|index| {
             let x = index as f64 / width as f64;
             let wave_a = (x * 13.0 + phase + seed).sin();
@@ -3037,6 +3037,40 @@ fn make_spectrum_lines(player: &PlayerState, width: usize, rows: usize) -> Vec<L
         })
         .collect::<Vec<_>>();
 
+    let heights = raw_heights
+        .iter()
+        .enumerate()
+        .map(|(index, current)| {
+            let left = if index > 0 {
+                raw_heights[index - 1]
+            } else {
+                *current
+            };
+            let right = if index + 1 < raw_heights.len() {
+                raw_heights[index + 1]
+            } else {
+                *current
+            };
+            let far_left = if index > 1 {
+                raw_heights[index - 2]
+            } else {
+                left
+            };
+            let far_right = if index + 2 < raw_heights.len() {
+                raw_heights[index + 2]
+            } else {
+                right
+            };
+            let blended = ((*current as f64 * 0.46)
+                + (left as f64 * 0.2)
+                + (right as f64 * 0.2)
+                + (far_left as f64 * 0.07)
+                + (far_right as f64 * 0.07))
+                .round() as usize;
+            blended.clamp(0, rows)
+        })
+        .collect::<Vec<_>>();
+
     (1..=rows)
         .rev()
         .map(|level| {
@@ -3051,8 +3085,42 @@ fn make_spectrum_lines(player: &PlayerState, width: usize, rows: usize) -> Vec<L
                 .iter()
                 .enumerate()
                 .map(|(index, height)| {
+                    let left = if index > 0 {
+                        heights[index - 1]
+                    } else {
+                        *height
+                    };
+                    let right = if index + 1 < heights.len() {
+                        heights[index + 1]
+                    } else {
+                        *height
+                    };
+                    let crest = *height == level;
+                    let shoulder = left < level || right < level;
+
                     if *height >= level {
-                        Span::styled("█".to_string(), Style::default().fg(color))
+                        let (ch, tint) = if crest && shoulder {
+                            match rows - level {
+                                0 => ('▀', XP_HIGHLIGHT),
+                                1 => ('▆', XP_MINT),
+                                _ => ('▅', color),
+                            }
+                        } else if crest {
+                            match rows - level {
+                                0 => ('▇', XP_HIGHLIGHT),
+                                1 => ('▇', XP_MINT),
+                                _ => ('▇', color),
+                            }
+                        } else if shoulder && rows - level <= 1 {
+                            ('▇', color)
+                        } else {
+                            ('█', color)
+                        };
+
+                        Span::styled(ch.to_string(), Style::default().fg(tint))
+                    } else if *height + 1 == level && (left >= level || right >= level) {
+                        let ghost = if rows - level <= 1 { '▪' } else { '·' };
+                        Span::styled(ghost.to_string(), Style::default().fg(XP_PANEL_DARK))
                     } else if level == 1 && index % 6 == 0 {
                         Span::styled("·".to_string(), Style::default().fg(XP_PANEL_DARK))
                     } else {
@@ -3332,6 +3400,18 @@ mod tests {
         let lines = make_spectrum_lines(&sample_player(), 18, 4);
         assert_eq!(lines.len(), 4);
         assert!(lines.iter().all(|line| line.spans.len() == 18));
+    }
+
+    #[test]
+    fn spectrum_lines_include_soft_crest_edges() {
+        let lines = make_spectrum_lines(&sample_player(), 18, 4);
+        let text = lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(text.contains('▀') || text.contains('▆') || text.contains('▅'));
     }
 
     #[test]
