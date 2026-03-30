@@ -812,17 +812,29 @@ fn render_album_tile(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area:
         PlaybackStatus::Stopped => XP_SKY,
     };
 
-    let widget = Paragraph::new(album_tile_lines(player))
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .title(" Album Glass ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(accent))
-                .style(Style::default().bg(XP_BLUE_MID)),
-        )
+    let block = Block::default()
+        .title(" Album Glass ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(accent))
         .style(Style::default().bg(XP_BLUE_MID));
-    frame.render_widget(widget, area);
+    frame.render_widget(block, area);
+
+    let inner = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    if inner.width < 6 || inner.height < 2 {
+        return;
+    }
+
+    let widget = Paragraph::new(album_tile_lines(
+        player,
+        inner.width as usize,
+        inner.height as usize,
+    ))
+    .alignment(Alignment::Center)
+    .style(Style::default().bg(XP_BLUE_MID));
+    frame.render_widget(widget, inner);
 }
 
 fn render_visualizer(frame: &mut ratatui::Frame<'_>, player: &PlayerState, area: Rect) {
@@ -2519,12 +2531,61 @@ fn visualizer_caption(player: &PlayerState) -> String {
     }
 }
 
-fn album_tile_lines(player: &PlayerState) -> Vec<Line<'static>> {
-    let glyph = match player.status {
-        PlaybackStatus::Playing => "♫",
-        PlaybackStatus::Paused => "♪",
-        PlaybackStatus::Stopped => "♬",
-    };
+fn album_tile_monogram(player: &PlayerState) -> String {
+    let source = player
+        .current_track
+        .as_ref()
+        .map(|track| track.title.clone())
+        .or_else(|| track_folder_label(player))
+        .unwrap_or_else(|| String::from("Terminal Audio Player"));
+
+    let mut monogram = source
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .take(2)
+        .filter_map(|part| part.chars().next())
+        .flat_map(|ch| ch.to_uppercase())
+        .collect::<String>();
+
+    if monogram.is_empty() {
+        monogram = source
+            .chars()
+            .filter(|ch| ch.is_alphanumeric())
+            .take(2)
+            .flat_map(|ch| ch.to_uppercase())
+            .collect();
+    }
+
+    if monogram.is_empty() {
+        String::from("TAP")
+    } else {
+        monogram.chars().take(3).collect()
+    }
+}
+
+fn album_tile_meta_text(player: &PlayerState, width: usize) -> String {
+    if player.current_track.is_none() {
+        return fit_text("queue to cue", width.max(1));
+    }
+
+    let mut parts = Vec::new();
+    if let Some(codec) = track_codec_label(player) {
+        parts.push(codec);
+    }
+    if width >= 10 {
+        parts.push(visualizer_preset(player).to_string());
+    }
+
+    if parts.is_empty() {
+        parts.push(title_state_text(&player.status).to_string());
+    }
+
+    fit_text(&parts.join(" • "), width.max(1))
+}
+
+fn album_tile_lines(player: &PlayerState, width: usize, height: usize) -> Vec<Line<'static>> {
+    let width = width.max(6);
+    let height = height.max(2);
     let badge_bg = match player.status {
         PlaybackStatus::Playing => XP_MINT,
         PlaybackStatus::Paused => XP_HIGHLIGHT,
@@ -2536,39 +2597,71 @@ fn album_tile_lines(player: &PlayerState) -> Vec<Line<'static>> {
         XP_TEXT_DARK
     };
 
-    vec![
-        Line::from(vec![Span::styled(
-            "MEDIA 9",
-            Style::default()
-                .fg(XP_TEXT_LIGHT)
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(vec![Span::styled(
-            title_state_text(&player.status),
-            Style::default().fg(XP_SKY).add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(vec![Span::styled(
-            glyph,
-            Style::default()
-                .fg(XP_HIGHLIGHT)
-                .add_modifier(Modifier::BOLD),
-        )]),
-        make_signature_line(player, 8),
-        Line::from(vec![Span::styled(
-            format!(" {} ", compact_time_label(player)),
-            Style::default()
-                .fg(XP_TEXT_LIGHT)
-                .bg(XP_BLUE_DEEP)
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(vec![Span::styled(
-            format!(" {:>3.0}% VOL ", player.volume * 100.0),
-            Style::default()
-                .fg(badge_fg)
-                .bg(badge_bg)
-                .add_modifier(Modifier::BOLD),
-        )]),
-    ]
+    let brand_line = Line::from(vec![Span::styled(
+        "MEDIA 9",
+        Style::default()
+            .fg(XP_TEXT_LIGHT)
+            .add_modifier(Modifier::BOLD),
+    )]);
+
+    let state_line = Line::from(vec![Span::styled(
+        title_state_text(&player.status),
+        Style::default().fg(XP_SKY).add_modifier(Modifier::BOLD),
+    )]);
+
+    let monogram_line = Line::from(vec![Span::styled(
+        fit_text(&album_tile_monogram(player), width),
+        Style::default()
+            .fg(XP_HIGHLIGHT)
+            .add_modifier(Modifier::BOLD),
+    )]);
+
+    let signature_line = make_signature_line(player, width.min(10).max(6));
+
+    let meta_line = Line::from(vec![Span::styled(
+        album_tile_meta_text(player, width),
+        Style::default().fg(XP_SILVER).add_modifier(Modifier::BOLD),
+    )]);
+
+    let volume_line = Line::from(vec![Span::styled(
+        format!(" {:>3.0}% VOL ", player.volume * 100.0),
+        Style::default()
+            .fg(badge_fg)
+            .bg(badge_bg)
+            .add_modifier(Modifier::BOLD),
+    )]);
+
+    let time_line = Line::from(vec![Span::styled(
+        format!(" {} ", compact_time_label(player)),
+        Style::default()
+            .fg(XP_TEXT_LIGHT)
+            .bg(XP_BLUE_DEEP)
+            .add_modifier(Modifier::BOLD),
+    )]);
+
+    match height {
+        2 => vec![monogram_line, time_line],
+        3 => vec![brand_line, monogram_line, time_line],
+        4 => vec![brand_line, monogram_line, meta_line, time_line],
+        5 => vec![brand_line, state_line, monogram_line, meta_line, time_line],
+        6 => vec![
+            brand_line,
+            state_line,
+            monogram_line,
+            signature_line,
+            meta_line,
+            time_line,
+        ],
+        _ => vec![
+            brand_line,
+            state_line,
+            monogram_line,
+            signature_line,
+            meta_line,
+            volume_line,
+            time_line,
+        ],
+    }
 }
 
 fn now_playing_context_line(player: &PlayerState, width: usize) -> Line<'static> {
@@ -3379,10 +3472,22 @@ mod tests {
     }
 
     #[test]
-    fn album_tile_lines_include_state_and_time_badges() {
-        let lines = album_tile_lines(&sample_player());
+    fn album_tile_lines_include_state_meta_and_time_badges() {
+        let lines = album_tile_lines(&sample_player(), 14, 6);
         assert!(lines[1].spans[0].content.contains("ON AIR"));
-        assert!(lines[4].spans[0].content.contains("01:13 / 03:32"));
+        assert!(lines[2].spans[0].content.contains("OA"));
+        assert!(lines[4].spans[0].content.contains("WAV"));
+        assert!(lines[5].spans[0].content.contains("01:13 / 03:32"));
+    }
+
+    #[test]
+    fn album_tile_lines_expand_with_available_height() {
+        let short = album_tile_lines(&sample_player(), 14, 3);
+        let tall = album_tile_lines(&sample_player(), 14, 7);
+
+        assert_eq!(short.len(), 3);
+        assert_eq!(tall.len(), 7);
+        assert!(tall[5].spans[0].content.contains("VOL"));
     }
 
     #[test]

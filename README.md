@@ -9,7 +9,7 @@ A lightweight Rust terminal audio player with a decoupled audio engine and TUI f
 - Supports **MP3, FLAC, WAV, OGG**
 - Left-hand library lane with tree + lane-monitor chrome
 - Playback deck guide, time ribbon, richer cue-stack chrome, and a status ribbon
-- Windows XP-inspired glossy media deck with blue-glass chrome, WMP-style mode tabs, title-bar window controls, a richer transport cluster, animated marquee text, source badges, dual drive meters, and responsive narrow-layout fallbacks
+- Windows XP-inspired glossy media deck with blue-glass chrome, WMP-style mode tabs, title-bar window controls, a richer transport cluster, responsive album-glass tile styling, animated marquee text, source badges, dual drive meters, and responsive narrow-layout fallbacks
 - Animated spectrum, crest + undertow wave stack, reflection, glow, preset shelf controls, and signal ladder visualizer keyed to playback state
 - Decoupled architecture using `std::sync::mpsc` channels
 - Unit-tested audio engine state transitions
